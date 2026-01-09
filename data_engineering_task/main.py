@@ -1,5 +1,5 @@
 from audit_metadata import DataValidator, EmailConfig
-from audit_data_fields import CueBoxValidator, InputSheets
+from audit_data_fields import VendorValidator, InputSheets
 import pandas as pd
 import os
 
@@ -34,7 +34,7 @@ def main():
             print("METADATA VALIDATION FAILED!")
             print("="*60)
             print("Critical errors found in input data (metadata).")
-            print("CueBox transformation will NOT be executed.")
+            print("Vendor transformation will NOT be executed.")
             print("Please fix the input data issues before proceeding.")
             print("="*60)
             
@@ -52,16 +52,16 @@ def main():
             print("\n" + "="*60)
             print("WORKFLOW STOPPED DUE TO METADATA ERRORS")
             print("="*60)
-            return  # Exit here - do not proceed to CueBox transformation
+            return  # Exit here - do not proceed to Vendor transformation
         
-        # If we reach here, metadata validation passed - proceed to CueBox transformation
+        # If we reach here, metadata validation passed - proceed to Vendor transformation
         print("METADATA VALIDATION PASSED!")
         print("="*60)
-        print("All input data is valid. Proceeding to CueBox transformation...")
+        print("All input data is valid. Proceeding to Vendor transformation...")
         print("="*60)
         
-        # Step 2: Load data for CueBox transformation
-        print("\nSTEP 2: Loading Data for CueBox Transformation")
+        # Step 2: Load data for Vendor transformation
+        print("\nSTEP 2: Loading Data for Vendor Transformation")
         constituents_df = pd.read_excel(excel_file_path, sheet_name=InputSheets.INPUT_CONSTITUENTS.value)
         emails_df = pd.read_excel(excel_file_path, sheet_name=InputSheets.INPUT_EMAILS.value)
         donations_df = pd.read_excel(excel_file_path, sheet_name=InputSheets.INPUT_DONATION_HISTORY.value)
@@ -72,28 +72,28 @@ def main():
         
         print("\n" + "="*60)
         
-        # Step 3: CueBox Transformation and Validation
-        print("STEP 3: CueBox Data Transformation & Validation")
-        cuebox_validator = CueBoxValidator("cuebox_transformation")
+        # Step 3: Vendor Transformation and Validation
+        print("STEP 3: Vendor Data Transformation & Validation")
+        Vendor_validator = VendorValidator("Vendor_transformation")
         
         # Transform and validate data (includes cleaning, combining, and validation)
-        output_df = cuebox_validator.validate_and_transform_data(
+        output_df = Vendor_validator.validate_and_transform_data(
             constituents_df, emails_df, donations_df
         )
         
-        # Step 4: Save CueBox output files
+        # Step 4: Save Vendor output files
         print("\n" + "="*60)
-        print("STEP 4: Saving CueBox Output Files")
+        print("STEP 4: Saving Vendor Output Files")
         timestamp = pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')
         
         # Save complete output (all records)
-        complete_filename = f"CueBox_Complete_Output_{timestamp}.xlsx"
+        complete_filename = f"Vendor_Complete_Output_{timestamp}.xlsx"
         output_df.to_excel(complete_filename, index=False)
-        print(f"Complete CueBox output saved to: {complete_filename}")
+        print(f"Complete Vendor output saved to: {complete_filename}")
         
         # Filter and save only valid records
-        valid_records_df = cuebox_validator.get_valid_records_only(output_df)
-        clean_filename = f"CueBox_Clean_Records_{timestamp}.xlsx"
+        valid_records_df = Vendor_validator.get_valid_records_only(output_df)
+        clean_filename = f"Vendor_Clean_Records_{timestamp}.xlsx"
         valid_records_df.to_excel(clean_filename, index=False)
         print(f"Clean records only saved to: {clean_filename}")
         print(f"Clean file contains {len(valid_records_df)} valid records out of {len(output_df)} total")
@@ -101,39 +101,39 @@ def main():
         # Step 5: Final Summary
         print("\n" + "="*60)
         print("FINAL SUMMARY")
-        summary = cuebox_validator.get_validation_summary()
+        summary = Vendor_validator.get_validation_summary()
         print(f"Total records processed: {summary['total_records']}")
         print(f"Valid records: {summary['valid_records']}")
         print(f"Invalid records: {summary['invalid_records']}")
         print(f"Validation success rate: {summary['validation_rate']:.2f}%")
-        print(f"CueBox validation log: {summary['log_file']}")
+        print(f"Vendor validation log: {summary['log_file']}")
         print(f"Complete output file: {complete_filename}")
         print(f"Clean records file: {clean_filename}")
         
-        # Step 6: Send email with CueBox results and output files
+        # Step 6: Send email with Vendor results and output files
         if send_email:
             print("\n" + "="*60)
-            print("STEP 6: Sending CueBox Results Report")
+            print("STEP 6: Sending Vendor Results Report")
             
-            # Prepare list of files to attach (CueBox output and logs)
+            # Prepare list of files to attach (Vendor output and logs)
             attachments = [
-                complete_filename,  # Complete CueBox output
+                complete_filename,  # Complete Vendor output
                 clean_filename,     # Clean records only
-                cuebox_validator.logger.get_log_filename()  # CueBox validation log
+                Vendor_validator.logger.get_log_filename()  # Vendor validation log
             ]
             
-            # Send comprehensive email with CueBox results and summary (without metadata log since it passed)
+            # Send comprehensive email with Vendor results and summary (without metadata log since it passed)
             success = metadata_validator.send_email_report(
                 additional_attachments=attachments,
-                cuebox_summary=summary,
+                Vendor_summary=summary,
                 include_metadata_log=False  # Don't include metadata log when it passed without errors
             )
             
             if success:
-                print("CueBox results sent successfully with attachments:")
+                print("Vendor results sent successfully with attachments:")
                 print(f"   {os.path.basename(complete_filename)}")
                 print(f"   {os.path.basename(clean_filename)}")
-                print(f"   {os.path.basename(cuebox_validator.logger.get_log_filename())}")
+                print(f"   {os.path.basename(Vendor_validator.logger.get_log_filename())}")
             else:
                 print("Failed to send email report")
         
@@ -152,3 +152,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
