@@ -476,31 +476,19 @@ class DataCleaner:
     
     @classmethod
     def standardize_company_name(cls, company: str) -> str:
-        """
-        Standardize company name
-        - Applies title case
-        - Preserves common business abbreviations in uppercase
-        - Removes excessive whitespace
-        - Keeps special characters (., &, etc.) that are common in company names
-        """
+        """Standardize company name"""
         if not company or company == 'nan' or company.strip() == '':
             return ''
         
         company = str(company).strip()
-        
-        # Remove excessive whitespace
-        import re
-        company = re.sub(r'\s+', ' ', company)
         
         # Basic company name standardization
         # Capitalize first letter of each word, but preserve common abbreviations
         words = []
         for word in company.split():
             # Common business abbreviations that should stay uppercase
-            if word.upper() in ['LLC', 'INC', 'CORP', 'LTD', 'CO', 'LP', 'PLC', 'USA', 'US']:
+            if word.upper() in ['LLC', 'INC', 'CORP', 'LTD', 'CO', 'LP', 'PLC']:
                 words.append(word.upper())
-            elif word.upper() in ['&', 'AND']:
-                words.append('&')
             else:
                 words.append(word.capitalize())
         
@@ -508,26 +496,18 @@ class DataCleaner:
     
     @classmethod
     def standardize_tags(cls, tags: str) -> str:
-        """
-        Standardize tags format
-        - Splits by comma
-        - Trims whitespace from each tag
-        - Removes duplicate tags
-        - Rejoins with consistent separator (comma + space)
-        """
+        """Standardize tags format"""
         if not tags or tags == 'nan' or tags.strip() == '':
             return ''
         
         tags = str(tags).strip()
         
-        # Split by comma, clean each tag, remove duplicates
+        # Split by comma, clean each tag, rejoin
         tag_list = []
-        seen_tags = set()
         for tag in tags.split(','):
             cleaned_tag = tag.strip()
-            if cleaned_tag and cleaned_tag not in seen_tags:
+            if cleaned_tag:
                 tag_list.append(cleaned_tag)
-                seen_tags.add(cleaned_tag)
         
         return ', '.join(tag_list)
     
