@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Data Import Assignment - Audit Script
-Validates the 3 required input sheets and transforms data to CueBox format
+Validates the 3 required input sheets and transforms data to Vendor format
 Uses Pydantic for robust input data validation
 """
 
@@ -42,9 +42,10 @@ class ConstituentRecord(BaseModel):
     primary_email: Optional[str] = Field(None, alias="Primary Email")
     company: Optional[str] = Field(None, alias="Company")
     salutation: Optional[str] = Field(None, alias="Salutation")
-    title: Optional[str] = Field(None, alias="Title")
+    title: Optional[str] = Field(None, alias="Title")  # Job Title
     tags: Optional[str] = Field(None, alias="Tags")
     gender: Optional[str] = Field(None, alias="Gender")
+    marital_status: Optional[str] = Field(None, alias="Marital Status")
         
     @field_validator('patron_id')
     @classmethod
@@ -215,7 +216,7 @@ class DataValidator:
         
         # Validate column structures for the 3 required sheets
         expected_constituent_columns = ["Patron ID", "First Name", "Last Name", "Date Entered", 
-                                      "Primary Email", "Company", "Salutation", "Title", "Tags", "Gender"]
+                                      "Primary Email", "Company", "Salutation", "Title", "Tags", "Gender", "Marital Status"]
         expected_email_columns = ["Patron ID", "Email"]
         expected_donation_columns = ["Patron ID", "Donation Amount", "Donation Date", 
                                    "Payment Method", "Campaign", "Status"]
@@ -373,7 +374,7 @@ class DataValidator:
         """Check if there were any validation errors during the process"""
         return self.total_validation_errors > 0
     
-    def send_email_report(self, email_config: Optional[EmailConfig] = None, additional_attachments: List[str] = None, cuebox_summary: dict = None, include_metadata_log: bool = True) -> bool:
+    def send_email_report(self, email_config: Optional[EmailConfig] = None, additional_attachments: List[str] = None, Vendor_summary: dict = None, include_metadata_log: bool = True) -> bool:
         """Send validation log file and additional attachments via email"""
         try:
             if email_config is None:
@@ -403,32 +404,32 @@ class DataValidator:
             # Email body
             attachment_info = "Please find the detailed validation log attached."
             if additional_attachments:
-                attachment_info += f"\n\nAdditional files attached: {len(additional_attachments)} CueBox output files"
+                attachment_info += f"\n\nAdditional files attached: {len(additional_attachments)} Vendor output files"
             
-            # Build CueBox summary section if provided
-            cuebox_section = ""
-            if cuebox_summary:
-                cuebox_section = f"""
+            # Build Vendor summary section if provided
+            Vendor_section = ""
+            if Vendor_summary:
+                Vendor_section = f"""
 
-CueBox Transformation Summary:
+Vendor Transformation Summary:
 ============================================================
-Total records processed: {cuebox_summary.get('total_records', 0)}
-Valid records: {cuebox_summary.get('valid_records', 0)}
-Invalid records: {cuebox_summary.get('invalid_records', 0)}
-Validation success rate: {cuebox_summary.get('validation_rate', 0):.2f}%
+Total records processed: {Vendor_summary.get('total_records', 0)}
+Valid records: {Vendor_summary.get('valid_records', 0)}
+Invalid records: {Vendor_summary.get('invalid_records', 0)}
+Validation success rate: {Vendor_summary.get('validation_rate', 0):.2f}%
 ============================================================
 """
             
             body = f"""
 Complete Data Processing Report
 
-Input Validation and CueBox Transformation completed successfully for Excel file: {self.excel_file_path}
+Input Validation and Vendor Transformation completed successfully for Excel file: {self.excel_file_path}
 
 Input Data Summary:
 - Constituents processed: {len(self.constituents_df) if self.constituents_df is not None else 0}
 - Email records processed: {len(self.emails_df) if self.emails_df is not None else 0}
 - Donation records processed: {len(self.donations_df) if self.donations_df is not None else 0}
-{cuebox_section}
+{Vendor_section}
 {attachment_info}
 
 Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
@@ -454,7 +455,7 @@ Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
                     self.logger.warning(f"Metadata log file not found: {self.log_filename}")
                     return False
             
-            # Attach additional files (CueBox output files)
+            # Attach additional files (Vendor output files)
             if additional_attachments:
                 for file_path in additional_attachments:
                     if os.path.exists(file_path):
@@ -520,5 +521,6 @@ Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
         self.logger.info(f"Total emails processed: {len(self.emails_df)}")
         self.logger.info(f"Total donations processed: {len(self.donations_df)}")
         self.logger.info("="*80)
+
 
 
