@@ -110,9 +110,14 @@ class FieldMappingRules:
         - If only job title: "Job Title: Professor"
         - If only marital status: "Marital Status: Married"
         - If neither present: empty string
+        - "Unknown" marital status is treated as not present
         """
         job_title = str(row.get("Title", "")).strip() if row.get("Title") else ""
-        marital_status = str(row.get("Marital Status", "")).strip() if row.get("Marital Status") else ""
+        marital_status = str(row.get("Gender", "")).strip() if row.get("Gender") else ""
+        
+        # Treat "Unknown" as blank/not present
+        if marital_status.lower() == "unknown":
+            marital_status = ""
         
         parts = []
         
@@ -261,7 +266,18 @@ class DataCleaner:
     
     @classmethod
     def clean_constituents_data(cls, df: pd.DataFrame) -> pd.DataFrame:
-        """Clean and standardize Input Constituents data"""
+        """
+        Clean and standardize Input Constituents data
+        
+        Applies the following cleaning operations:
+        - Trims whitespace from all string columns
+        - Converts names to title case
+        - Removes special characters from names
+        - Standardizes email addresses (lowercase, removes spaces)
+        - Standardizes salutation/title values
+        - Cleans and standardizes tags
+        - Standardizes timestamp format
+        """
         
         # Trim whitespace from all string columns
         string_columns = ["First Name", "Last Name", "Primary Email", "Company", 
@@ -280,7 +296,7 @@ class DataCleaner:
         if "Salutation" in df.columns:
             df["Salutation"] = df["Salutation"].apply(cls.standardize_title)
         
-        # Standardize names (proper case)
+        # Standardize names (proper case, remove special characters)
         if "First Name" in df.columns:
             df["First Name"] = df["First Name"].apply(cls.standardize_name)
         if "Last Name" in df.columns:
@@ -300,7 +316,15 @@ class DataCleaner:
     
     @classmethod
     def clean_emails_data(cls, df: pd.DataFrame) -> pd.DataFrame:
-        """Clean and standardize Input Emails data"""
+        """
+        Clean and standardize Input Emails data
+        
+        Applies the following cleaning operations:
+        - Trims whitespace
+        - Converts email to lowercase
+        - Removes spaces from email addresses
+        - Validates basic email format
+        """
         
         # Trim whitespace from email column
         if "Email" in df.columns:
@@ -314,7 +338,15 @@ class DataCleaner:
     
     @classmethod
     def clean_donations_data(cls, df: pd.DataFrame) -> pd.DataFrame:
-        """Clean and standardize Input Donation History data"""
+        """
+        Clean and standardize Input Donation History data
+        
+        Applies the following cleaning operations:
+        - Trims whitespace from string columns
+        - Standardizes payment method values
+        - Converts campaign names to title case
+        - Standardizes donation status values
+        """
         
         # Trim whitespace from string columns
         string_columns = ["Payment Method", "Campaign", "Status"]
@@ -340,19 +372,43 @@ class DataCleaner:
     
     @classmethod
     def standardize_email(cls, email: str) -> str:
-        """Standardize email address format"""
+        """
+        Standardize email address format
+        - Converts to lowercase
+        - Removes all whitespace
+        - Validates basic email format (@, domain)
+        - Removes special characters except @ . _ - +
+        """
         if not email or email == 'nan' or email.strip() == '':
             return ''
         
         email = str(email).strip().lower()
         
-        # Basic email validation and cleaning
-        if '@' in email and '.' in email.split('@')[-1]:
-            # Remove extra spaces around @ and .
-            email = email.replace(' ', '')
-            return email
+        # Remove all spaces
+        email = email.replace(' ', '')
+        
+        # Basic email validation
+        if '@' not in email:
+            return ''
+        
+        parts = email.split('@')
+        if len(parts) != 2:
+            return ''
+        
+        local_part, domain = parts
+        
+        # Check if domain has at least one dot
+        if '.' not in domain:
+            return ''
+        
+        # Remove special characters except allowed ones
+        import re
+        local_part = re.sub(r'[^a-z0-9._+\-]', '', local_part)
+        domain = re.sub(r'[^a-z0-9.\-]', '', domain)
+        
+        if local_part and domain:
+            return f"{local_part}@{domain}"
         else:
-            # Invalid email format, return empty string
             return ''
     
     @classmethod
@@ -385,11 +441,26 @@ class DataCleaner:
     
     @classmethod
     def standardize_name(cls, name: str) -> str:
-        """Standardize person name (proper case)"""
+        """
+        Standardize person name (proper case)
+        - Applies title case
+        - Removes special characters except hyphens and apostrophes
+        - Handles multi-part names properly (e.g., O'Brien, Mary-Jane)
+        """
         if not name or name == 'nan' or name.strip() == '':
             return ''
         
         name = str(name).strip()
+        
+        # Remove special characters except letters, spaces, hyphens, and apostrophes
+        import re
+        name = re.sub(r"[^a-zA-Z\s\-']", '', name)
+        
+        # Remove multiple spaces
+        name = re.sub(r'\s+', ' ', name).strip()
+        
+        if not name:
+            return ''
         
         # Convert to proper case (first letter uppercase, rest lowercase)
         # Handle names with spaces, hyphens, apostrophes
@@ -405,19 +476,31 @@ class DataCleaner:
     
     @classmethod
     def standardize_company_name(cls, company: str) -> str:
-        """Standardize company name"""
+        """
+        Standardize company name
+        - Applies title case
+        - Preserves common business abbreviations in uppercase
+        - Removes excessive whitespace
+        - Keeps special characters (., &, etc.) that are common in company names
+        """
         if not company or company == 'nan' or company.strip() == '':
             return ''
         
         company = str(company).strip()
+        
+        # Remove excessive whitespace
+        import re
+        company = re.sub(r'\s+', ' ', company)
         
         # Basic company name standardization
         # Capitalize first letter of each word, but preserve common abbreviations
         words = []
         for word in company.split():
             # Common business abbreviations that should stay uppercase
-            if word.upper() in ['LLC', 'INC', 'CORP', 'LTD', 'CO', 'LP', 'PLC']:
+            if word.upper() in ['LLC', 'INC', 'CORP', 'LTD', 'CO', 'LP', 'PLC', 'USA', 'US']:
                 words.append(word.upper())
+            elif word.upper() in ['&', 'AND']:
+                words.append('&')
             else:
                 words.append(word.capitalize())
         
@@ -425,18 +508,26 @@ class DataCleaner:
     
     @classmethod
     def standardize_tags(cls, tags: str) -> str:
-        """Standardize tags format"""
+        """
+        Standardize tags format
+        - Splits by comma
+        - Trims whitespace from each tag
+        - Removes duplicate tags
+        - Rejoins with consistent separator (comma + space)
+        """
         if not tags or tags == 'nan' or tags.strip() == '':
             return ''
         
         tags = str(tags).strip()
         
-        # Split by comma, clean each tag, rejoin
+        # Split by comma, clean each tag, remove duplicates
         tag_list = []
+        seen_tags = set()
         for tag in tags.split(','):
             cleaned_tag = tag.strip()
-            if cleaned_tag:
+            if cleaned_tag and cleaned_tag not in seen_tags:
                 tag_list.append(cleaned_tag)
+                seen_tags.add(cleaned_tag)
         
         return ', '.join(tag_list)
     
