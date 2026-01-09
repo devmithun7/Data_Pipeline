@@ -125,7 +125,7 @@ def main():
             # Send comprehensive email with Vendor results and summary (without metadata log since it passed)
             success = metadata_validator.send_email_report(
                 additional_attachments=attachments,
-                Vendor_summary=summary,
+                vendor_summary=summary,
                 include_metadata_log=False  # Don't include metadata log when it passed without errors
             )
             
