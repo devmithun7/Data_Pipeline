@@ -2,7 +2,7 @@
 """
 Data Fields Audit Module
 Defines field mappings, validation rules, and transformation logic for combining
-Input Constituents, Input Emails, and Input Donation History into CueBox output format
+Input Constituents, Input Emails, and Input Donation History into Vendor output format
 """
 
 from enum import Enum
@@ -21,8 +21,8 @@ class InputSheets(str, Enum):
     INPUT_DONATION_HISTORY = "Input Donation History"
 
 
-class CueBoxOutputColumns(str, Enum):
-    """CueBox output column definitions"""
+class VendorOutputColumns(str, Enum):
+    """Vendor output column definitions"""
     CB_CONSTITUENT_ID = "CB Constituent ID"
     CB_CONSTITUENT_TYPE = "CB Constituent Type"
     CB_FIRST_NAME = "CB First Name"
@@ -40,18 +40,18 @@ class CueBoxOutputColumns(str, Enum):
 
 
 class FieldMappingRules:
-    """Defines how input fields map to CueBox output fields"""
+    """Defines how input fields map to Vendor output fields"""
     
     # Direct field mappings from Input Constituents
     CONSTITUENT_MAPPINGS = {
-        "Patron ID": CueBoxOutputColumns.CB_CONSTITUENT_ID.value,
-        "First Name": CueBoxOutputColumns.CB_FIRST_NAME.value,
-        "Last Name": CueBoxOutputColumns.CB_LAST_NAME.value,
-        "Company": CueBoxOutputColumns.CB_COMPANY_NAME.value,
-        "Date Entered": CueBoxOutputColumns.CB_CREATED_AT.value,
-        "Primary Email": CueBoxOutputColumns.CB_EMAIL_1.value,
-        "Salutation": CueBoxOutputColumns.CB_TITLE.value,
-        "Tags": CueBoxOutputColumns.CB_TAGS.value
+        "Patron ID": VendorOutputColumns.CB_CONSTITUENT_ID.value,
+        "First Name": VendorOutputColumns.CB_FIRST_NAME.value,
+        "Last Name": VendorOutputColumns.CB_LAST_NAME.value,
+        "Company": VendorOutputColumns.CB_COMPANY_NAME.value,
+        "Date Entered": VendorOutputColumns.CB_CREATED_AT.value,
+        "Primary Email": VendorOutputColumns.CB_EMAIL_1.value,
+        "Salutation": VendorOutputColumns.CB_TITLE.value,
+        "Tags": VendorOutputColumns.CB_TAGS.value
     }
     
     @classmethod
@@ -99,10 +99,34 @@ class FieldMappingRules:
         recent_amount = most_recent["Donation Amount"]
         
         return str(lifetime_amount), str(recent_date), str(recent_amount)
+    
+    @classmethod
+    def format_background_information(cls, row: dict) -> str:
+        """
+        Format background information string from job title and marital status.
+        
+        Rules:
+        - If both present: "Job Title: Professor; Marital Status: Married"
+        - If only job title: "Job Title: Professor"
+        - If only marital status: "Marital Status: Married"
+        - If neither present: empty string
+        """
+        job_title = str(row.get("Title", "")).strip() if row.get("Title") else ""
+        marital_status = str(row.get("Marital Status", "")).strip() if row.get("Marital Status") else ""
+        
+        parts = []
+        
+        if job_title:
+            parts.append(f"Job Title: {job_title}")
+        
+        if marital_status:
+            parts.append(f"Marital Status: {marital_status}")
+        
+        return "; ".join(parts)
 
 
-class CueBoxValidationRules:
-    """Validation rules for CueBox output columns"""
+class VendorValidationRules:
+    """Validation rules for Vendor output columns"""
     
     @classmethod
     def validate_cb_constituent_id(cls, value: Any) -> List[str]:
@@ -126,11 +150,11 @@ class CueBoxValidationRules:
     def validate_cb_name_fields(cls, row_data: dict) -> List[str]:
         """Validate name fields based on constituent type"""
         errors = []
-        constituent_type = row_data.get(CueBoxOutputColumns.CB_CONSTITUENT_TYPE.value)
+        constituent_type = row_data.get(VendorOutputColumns.CB_CONSTITUENT_TYPE.value)
         
         if constituent_type == "Person":
-            first_name = row_data.get(CueBoxOutputColumns.CB_FIRST_NAME.value, "").strip()
-            last_name = row_data.get(CueBoxOutputColumns.CB_LAST_NAME.value, "").strip()
+            first_name = row_data.get(VendorOutputColumns.CB_FIRST_NAME.value, "").strip()
+            last_name = row_data.get(VendorOutputColumns.CB_LAST_NAME.value, "").strip()
             
             if not first_name:
                 errors.append("CB First Name is required when CB Constituent Type is 'Person'")
@@ -138,7 +162,7 @@ class CueBoxValidationRules:
                 errors.append("CB Last Name is required when CB Constituent Type is 'Person'")
                 
         elif constituent_type == "Company":
-            company_name = row_data.get(CueBoxOutputColumns.CB_COMPANY_NAME.value, "").strip()
+            company_name = row_data.get(VendorOutputColumns.CB_COMPANY_NAME.value, "").strip()
             if not company_name:
                 errors.append("CB Company Name is required when CB Constituent Type is 'Company'")
         
@@ -179,9 +203,9 @@ class CueBoxValidationRules:
         """Validate donation fields - should be empty string if constituent has never donated"""
         errors = []
         
-        lifetime_amount = row_data.get(CueBoxOutputColumns.CB_LIFETIME_DONATION.value, "")
-        recent_date = row_data.get(CueBoxOutputColumns.CB_RECENT_DONATION_DATE.value, "")
-        recent_amount = row_data.get(CueBoxOutputColumns.CB_RECENT_DONATION_AMOUNT.value, "")
+        lifetime_amount = row_data.get(VendorOutputColumns.CB_LIFETIME_DONATION.value, "")
+        recent_date = row_data.get(VendorOutputColumns.CB_RECENT_DONATION_DATE.value, "")
+        recent_amount = row_data.get(VendorOutputColumns.CB_RECENT_DONATION_AMOUNT.value, "")
         
         # Check consistency - if no donations, all should be empty
         has_lifetime = lifetime_amount and str(lifetime_amount).strip()
@@ -200,17 +224,17 @@ class CueBoxValidationRules:
         return errors
     
     @classmethod
-    def validate_cuebox_row(cls, row_data: dict) -> List[str]:
-        """Validate a complete CueBox output row"""
+    def validate_Vendor_row(cls, row_data: dict) -> List[str]:
+        """Validate a complete Vendor output row"""
         all_errors = []
         
         # Validate individual fields
-        all_errors.extend(cls.validate_cb_constituent_id(row_data.get(CueBoxOutputColumns.CB_CONSTITUENT_ID.value)))
-        all_errors.extend(cls.validate_cb_constituent_type(row_data.get(CueBoxOutputColumns.CB_CONSTITUENT_TYPE.value)))
-        all_errors.extend(cls.validate_cb_created_at(row_data.get(CueBoxOutputColumns.CB_CREATED_AT.value)))
-        all_errors.extend(cls.validate_cb_email(row_data.get(CueBoxOutputColumns.CB_EMAIL_1.value), "CB Email 1"))
-        all_errors.extend(cls.validate_cb_email(row_data.get(CueBoxOutputColumns.CB_EMAIL_2.value), "CB Email 2"))
-        all_errors.extend(cls.validate_cb_title(row_data.get(CueBoxOutputColumns.CB_TITLE.value)))
+        all_errors.extend(cls.validate_cb_constituent_id(row_data.get(VendorOutputColumns.CB_CONSTITUENT_ID.value)))
+        all_errors.extend(cls.validate_cb_constituent_type(row_data.get(VendorOutputColumns.CB_CONSTITUENT_TYPE.value)))
+        all_errors.extend(cls.validate_cb_created_at(row_data.get(VendorOutputColumns.CB_CREATED_AT.value)))
+        all_errors.extend(cls.validate_cb_email(row_data.get(VendorOutputColumns.CB_EMAIL_1.value), "CB Email 1"))
+        all_errors.extend(cls.validate_cb_email(row_data.get(VendorOutputColumns.CB_EMAIL_2.value), "CB Email 2"))
+        all_errors.extend(cls.validate_cb_title(row_data.get(VendorOutputColumns.CB_TITLE.value)))
         
         # Validate dependent fields
         all_errors.extend(cls.validate_cb_name_fields(row_data))
@@ -512,12 +536,12 @@ class DataCleaner:
 
 
 class DataCombiner:
-    """Combines data from the three input sheets into CueBox output format"""
+    """Combines data from the three input sheets into Vendor output format"""
     
     @classmethod
     def combine_data(cls, constituents_df: pd.DataFrame, emails_df: pd.DataFrame, 
                     donations_df: pd.DataFrame) -> pd.DataFrame:
-        """Combine the three input sheets into CueBox output format with cleaning"""
+        """Combine the three input sheets into Vendor output format with cleaning"""
         
         # First, clean and standardize all input data
         print("Cleaning and standardizing input data...")
@@ -540,7 +564,7 @@ class DataCombiner:
                 output_row[output_field] = constituent_row.get(input_field, "")
             
             # Determine constituent type
-            output_row[CueBoxOutputColumns.CB_CONSTITUENT_TYPE.value] = FieldMappingRules.determine_constituent_type(constituent_row.to_dict())
+            output_row[VendorOutputColumns.CB_CONSTITUENT_TYPE.value] = FieldMappingRules.determine_constituent_type(constituent_row.to_dict())
             
             # Get emails from cleaned Input Emails sheet
             email_1, email_2 = FieldMappingRules.get_constituent_emails(patron_id, clean_emails)
@@ -549,25 +573,25 @@ class DataCombiner:
             if not email_1 and constituent_row.get("Primary Email"):
                 email_1 = constituent_row["Primary Email"]
             
-            output_row[CueBoxOutputColumns.CB_EMAIL_1.value] = email_1
-            output_row[CueBoxOutputColumns.CB_EMAIL_2.value] = email_2
+            output_row[VendorOutputColumns.CB_EMAIL_1.value] = email_1
+            output_row[VendorOutputColumns.CB_EMAIL_2.value] = email_2
             
             # Calculate donation summary from cleaned Input Donation History sheet
             lifetime_amount, recent_date, recent_amount = FieldMappingRules.calculate_donation_summary(patron_id, clean_donations)
-            output_row[CueBoxOutputColumns.CB_LIFETIME_DONATION.value] = lifetime_amount
-            output_row[CueBoxOutputColumns.CB_RECENT_DONATION_DATE.value] = recent_date
-            output_row[CueBoxOutputColumns.CB_RECENT_DONATION_AMOUNT.value] = recent_amount
+            output_row[VendorOutputColumns.CB_LIFETIME_DONATION.value] = lifetime_amount
+            output_row[VendorOutputColumns.CB_RECENT_DONATION_DATE.value] = recent_date
+            output_row[VendorOutputColumns.CB_RECENT_DONATION_AMOUNT.value] = recent_amount
             
-            # Background Information - empty for now
-            output_row[CueBoxOutputColumns.CB_BACKGROUND_INFO.value] = ""
+            # Format Background Information (Job Title and Marital Status)
+            output_row[VendorOutputColumns.CB_BACKGROUND_INFO.value] = FieldMappingRules.format_background_information(constituent_row.to_dict())
             
             output_rows.append(output_row)
         
-        # Create DataFrame with CueBox output format
+        # Create DataFrame with Vendor output format
         output_df = pd.DataFrame(output_rows)
         
         # Ensure all required columns exist
-        for column in CueBoxOutputColumns:
+        for column in VendorOutputColumns:
             if column.value not in output_df.columns:
                 output_df[column.value] = ""
         
@@ -577,7 +601,7 @@ class DataCombiner:
 class ValidationLogger:
     """Handles logging of validation errors and failed records"""
     
-    def __init__(self, log_prefix: str = "cuebox_validation"):
+    def __init__(self, log_prefix: str = "Vendor_validation"):
         """Initialize validation logger with timestamped log file"""
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         self.log_filename = f"{log_prefix}_{timestamp}.log"
@@ -597,7 +621,7 @@ class ValidationLogger:
         
         # Log session start
         self.logger.info("="*80)
-        self.logger.info("CUEBOX VALIDATION SESSION STARTED")
+        self.logger.info("Vendor VALIDATION SESSION STARTED")
         self.logger.info(f"Log file: {self.log_filename}")
         self.logger.info("="*80)
     
@@ -611,7 +635,7 @@ class ValidationLogger:
     
     def log_transformation_start(self, total_constituents: int):
         """Log start of data transformation"""
-        self.logger.info("STARTING DATA TRANSFORMATION TO CUEBOX FORMAT")
+        self.logger.info("STARTING DATA TRANSFORMATION TO Vendor FORMAT")
         self.logger.info(f"Processing {total_constituents} constituents")
         self.logger.info("-" * 60)
     
@@ -655,7 +679,7 @@ class ValidationLogger:
     def log_session_end(self):
         """Log session end"""
         self.logger.info("="*80)
-        self.logger.info("CUEBOX VALIDATION SESSION COMPLETED")
+        self.logger.info("Vendor VALIDATION SESSION COMPLETED")
         self.logger.info(f"Detailed logs saved to: {self.log_filename}")
         self.logger.info("="*80)
     
@@ -664,10 +688,10 @@ class ValidationLogger:
         return self.log_filename
 
 
-class CueBoxValidator:
+class VendorValidator:
     """Main validator class that combines data transformation and validation with logging"""
     
-    def __init__(self, log_prefix: str = "cuebox_validation"):
+    def __init__(self, log_prefix: str = "Vendor_validation"):
         """Initialize validator with logging"""
         self.logger = ValidationLogger(log_prefix)
         self.validation_errors = []
@@ -689,12 +713,12 @@ class CueBoxValidator:
         self.logger.log_transformation_start(len(constituents_df))
         
         # Step 2: Validate each output record
-        print("Validating CueBox output records...")
-        self.logger.logger.info("STARTING CUEBOX OUTPUT VALIDATION")
+        print("Validating Vendor output records...")
+        self.logger.logger.info("STARTING Vendor OUTPUT VALIDATION")
         
         for index, row in output_df.iterrows():
             row_data = row.to_dict()
-            validation_errors = CueBoxValidationRules.validate_cuebox_row(row_data)
+            validation_errors = VendorValidationRules.validate_Vendor_row(row_data)
             
             if validation_errors:
                 self.invalid_records += 1
@@ -739,7 +763,7 @@ class CueBoxValidator:
         
         for index, row in output_df.iterrows():
             row_data = row.to_dict()
-            validation_errors = CueBoxValidationRules.validate_cuebox_row(row_data)
+            validation_errors = VendorValidationRules.validate_Vendor_row(row_data)
             
             # If no validation errors, include this record
             if not validation_errors:
@@ -774,12 +798,13 @@ class ValidationSummary(BaseModel):
 # Export commonly used classes and functions
 __all__ = [
     'InputSheets',
-    'CueBoxOutputColumns',
+    'VendorOutputColumns',
     'FieldMappingRules',
-    'CueBoxValidationRules',
+    'VendorValidationRules',
     'DataCleaner',
     'DataCombiner',
     'ValidationLogger',
-    'CueBoxValidator',
+    'VendorValidator',
     'ValidationSummary'
 ]
+
