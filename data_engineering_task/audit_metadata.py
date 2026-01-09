@@ -44,8 +44,7 @@ class ConstituentRecord(BaseModel):
     salutation: Optional[str] = Field(None, alias="Salutation")
     title: Optional[str] = Field(None, alias="Title")  # Job Title
     tags: Optional[str] = Field(None, alias="Tags")
-    gender: Optional[str] = Field(None, alias="Gender")
-    marital_status: Optional[str] = Field(None, alias="Marital Status")
+    gender: Optional[str] = Field(None, alias="Gender")  # Contains Marital Status data
         
     @field_validator('patron_id')
     @classmethod
@@ -216,7 +215,7 @@ class DataValidator:
         
         # Validate column structures for the 3 required sheets
         expected_constituent_columns = ["Patron ID", "First Name", "Last Name", "Date Entered", 
-                                      "Primary Email", "Company", "Salutation", "Title", "Tags", "Gender", "Marital Status"]
+                                      "Primary Email", "Company", "Salutation", "Title", "Tags", "Gender"]
         expected_email_columns = ["Patron ID", "Email"]
         expected_donation_columns = ["Patron ID", "Donation Amount", "Donation Date", 
                                    "Payment Method", "Campaign", "Status"]
@@ -374,7 +373,7 @@ class DataValidator:
         """Check if there were any validation errors during the process"""
         return self.total_validation_errors > 0
     
-    def send_email_report(self, email_config: Optional[EmailConfig] = None, additional_attachments: List[str] = None, Vendor_summary: dict = None, include_metadata_log: bool = True) -> bool:
+    def send_email_report(self, email_config: Optional[EmailConfig] = None, additional_attachments: List[str] = None, vendor_summary: dict = None, include_metadata_log: bool = True) -> bool:
         """Send validation log file and additional attachments via email"""
         try:
             if email_config is None:
@@ -401,38 +400,104 @@ class DataValidator:
             msg['To'] = email_config.recipient_email
             msg['Subject'] = f"Complete Data Processing Report - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
             
-            # Email body
-            attachment_info = "Please find the detailed validation log attached."
-            if additional_attachments:
-                attachment_info += f"\n\nAdditional files attached: {len(additional_attachments)} Vendor output files"
-            
-            # Build Vendor summary section if provided
-            Vendor_section = ""
-            if Vendor_summary:
-                Vendor_section = f"""
+            # Build email body with simple, clean formatting
+            if vendor_summary:
+                # Email with Vendor transformation results
+                body = f"""
+DATA PROCESSING REPORT
+Generated: {datetime.now().strftime('%B %d, %Y at %I:%M %p')}
 
-Vendor Transformation Summary:
-============================================================
-Total records processed: {Vendor_summary.get('total_records', 0)}
-Valid records: {Vendor_summary.get('valid_records', 0)}
-Invalid records: {Vendor_summary.get('invalid_records', 0)}
-Validation success rate: {Vendor_summary.get('validation_rate', 0):.2f}%
-============================================================
+Hello,
+
+Your data processing has completed successfully. Here's a quick summary:
+
+------------------------------------------------------------------------
+SOURCE FILE:
+{self.excel_file_path}
+
+------------------------------------------------------------------------
+RESULTS:
+
+Input Data Processed:
+  - Constituents: {len(self.constituents_df) if self.constituents_df is not None else 0}
+  - Emails: {len(self.emails_df) if self.emails_df is not None else 0}
+  - Donations: {len(self.donations_df) if self.donations_df is not None else 0}
+
+Vendor Transformation:
+  - Total Records: {vendor_summary.get('total_records', 0)}
+  - Valid Records: {vendor_summary.get('valid_records', 0)}
+  - Invalid Records: {vendor_summary.get('invalid_records', 0)}
+  - Success Rate: {vendor_summary.get('validation_rate', 0):.2f}%
+
+------------------------------------------------------------------------
+ATTACHED FILES ({len(additional_attachments) if additional_attachments else 0}):
+
+1. Vendor_Complete_Output.xlsx
+   All {vendor_summary.get('total_records', 0)} records included
+
+2. Vendor_Clean_Records.xlsx  
+   Only {vendor_summary.get('valid_records', 0)} validated records (ready to import)
+
+3. Vendor_transformation.log
+   Error details for {vendor_summary.get('invalid_records', 0)} invalid records
+
+------------------------------------------------------------------------
+WHAT TO DO NEXT:
+
+- Import the "Clean_Records" file into your Vendor system
+- Review the log file to see why {vendor_summary.get('invalid_records', 0)} records failed validation
+- Fix any data issues and re-run if needed
+
+------------------------------------------------------------------------
+
+Questions? Contact your data team.
+
+This is an automated message.
 """
-            
-            body = f"""
-Complete Data Processing Report
+            else:
+                # Email with metadata validation failure
+                body = f"""
+DATA VALIDATION ALERT
+Generated: {datetime.now().strftime('%B %d, %Y at %I:%M %p')}
 
-Input Validation and Vendor Transformation completed successfully for Excel file: {self.excel_file_path}
+Hello,
 
-Input Data Summary:
-- Constituents processed: {len(self.constituents_df) if self.constituents_df is not None else 0}
-- Email records processed: {len(self.emails_df) if self.emails_df is not None else 0}
-- Donation records processed: {len(self.donations_df) if self.donations_df is not None else 0}
-{Vendor_section}
-{attachment_info}
+The validation process found errors in your input data.
 
-Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+------------------------------------------------------------------------
+SOURCE FILE:
+{self.excel_file_path}
+
+------------------------------------------------------------------------
+WHAT HAPPENED:
+
+Your file has {self.total_validation_errors} validation error(s) that need to be fixed 
+before we can process the data.
+
+Input Data Found:
+  - Constituents: {len(self.constituents_df) if self.constituents_df is not None else 0}
+  - Emails: {len(self.emails_df) if self.emails_df is not None else 0}
+  - Donations: {len(self.donations_df) if self.donations_df is not None else 0}
+
+STATUS: Failed - Processing stopped to prevent bad data from going through
+
+------------------------------------------------------------------------
+ATTACHED FILES:
+
+- validation_errors.log (detailed error information)
+
+------------------------------------------------------------------------
+WHAT TO DO NEXT:
+
+1. Open the attached log file to see exactly what's wrong
+2. Fix the errors in your Excel file
+3. Run the validation again
+
+------------------------------------------------------------------------
+
+Questions? Contact your data team.
+
+This is an automated message.
 """
             
             msg.attach(MIMEText(body, 'plain'))
