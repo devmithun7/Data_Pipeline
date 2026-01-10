@@ -354,7 +354,5 @@ data_engineering_task/
 
 This project is licensed under the MIT License.
 
-## Contact
 
-For questions or issues, please contact the development team.
 
