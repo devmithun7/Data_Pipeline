@@ -76,9 +76,16 @@ def main():
         print("STEP 3: Vendor Data Transformation & Validation")
         Vendor_validator = VendorValidator("Vendor_transformation")
         
+        # Get tag mappings from metadata validator (retrieved from API)
+        tag_mappings = metadata_validator.get_tag_mappings()
+        if tag_mappings:
+            print(f"Using {len(tag_mappings)} tag mappings from API for transformation")
+        else:
+            print("No tag mappings available - tags will not be transformed")
+        
         # Transform and validate data (includes cleaning, combining, and validation)
         output_df = Vendor_validator.validate_and_transform_data(
-            constituents_df, emails_df, donations_df
+            constituents_df, emails_df, donations_df, tag_mappings
         )
         
         # Step 4: Save Vendor output files
@@ -86,17 +93,24 @@ def main():
         print("STEP 4: Saving Vendor Output Files")
         timestamp = pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')
         
-        # Save complete output (all records)
-        complete_filename = f"Vendor_Complete_Output_{timestamp}.xlsx"
+        # Save complete output (all records - including invalid)
+        complete_filename = f"Constituent_Unclean_{timestamp}.xlsx"
         output_df.to_excel(complete_filename, index=False)
         print(f"Complete Vendor output saved to: {complete_filename}")
         
         # Filter and save only valid records
         valid_records_df = Vendor_validator.get_valid_records_only(output_df)
-        clean_filename = f"Vendor_Clean_Records_{timestamp}.xlsx"
+        clean_filename = f"Constituent_Clean_{timestamp}.xlsx"
         valid_records_df.to_excel(clean_filename, index=False)
         print(f"Clean records only saved to: {clean_filename}")
         print(f"Clean file contains {len(valid_records_df)} valid records out of {len(output_df)} total")
+        
+        # Generate and save tag summary report (matching original tags to API)
+        tag_summary_df = Vendor_validator.generate_tag_summary_report(constituents_df, tag_mappings)
+        tag_summary_filename = f"Constituent_tag_count_{timestamp}.xlsx"
+        tag_summary_df.to_excel(tag_summary_filename, index=False)
+        print(f"Tag summary report saved to: {tag_summary_filename}")
+        print(f"Tag summary contains {len(tag_summary_df)} unique API-mapped tags")
         
         # Step 5: Final Summary
         print("\n" + "="*60)
@@ -109,6 +123,7 @@ def main():
         print(f"Vendor validation log: {summary['log_file']}")
         print(f"Complete output file: {complete_filename}")
         print(f"Clean records file: {clean_filename}")
+        print(f"Tag summary file: {tag_summary_filename}")
         
         # Step 6: Send email with Vendor results and output files
         if send_email:
@@ -119,6 +134,7 @@ def main():
             attachments = [
                 complete_filename,  # Complete Vendor output
                 clean_filename,     # Clean records only
+                tag_summary_filename,  # Tag summary report
                 Vendor_validator.logger.get_log_filename()  # Vendor validation log
             ]
             
@@ -133,6 +149,7 @@ def main():
                 print("Vendor results sent successfully with attachments:")
                 print(f"   {os.path.basename(complete_filename)}")
                 print(f"   {os.path.basename(clean_filename)}")
+                print(f"   {os.path.basename(tag_summary_filename)}")
                 print(f"   {os.path.basename(Vendor_validator.logger.get_log_filename())}")
             else:
                 print("Failed to send email report")
