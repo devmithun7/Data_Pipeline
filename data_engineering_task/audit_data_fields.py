@@ -1023,34 +1023,66 @@ class VendorValidator:
         
         return valid_df
     
-    def generate_tag_summary_report(self, constituents_df: pd.DataFrame, tag_mappings: Dict[str, str] = None) -> pd.DataFrame:
+    def generate_tag_summary_report(self, constituents_df: pd.DataFrame, tag_mappings: Dict[str, str] = None, output_df: pd.DataFrame = None) -> tuple:
         """
-        Generate tag summary report by matching ORIGINAL INPUT tags against API and counting constituents
+        Generate tag summary report with TWO sheets:
+        1. All Records - tag counts from all original input records
+        2. Clean Records - tag counts from only valid/clean records
         
         Process:
         1. Read ORIGINAL tags from Input Constituents sheet (before mapping)
         2. Normalize and match against API's "name" field
-        3. Count how many constituents have tags that match the API
-        4. Show the API's "mapped_name" with the constituent count
+        3. Count constituents for both all records and clean records separately
+        4. Show the API's "mapped_name" with constituent counts
         
         Args:
             constituents_df: Original Input Constituents dataframe (BEFORE transformation)
             tag_mappings: Dictionary of API tag mappings (normalized name -> mapped_name)
+            output_df: Transformed output dataframe (optional, for clean records filtering)
             
         Returns:
-            DataFrame with columns: CB Tag Name (mapped_name), CB Tag Count
+            tuple: (all_records_df, clean_records_df) - DataFrames for both sheets
         """
         print("Generating tag summary report (matching original tags to API)...")
         
         if not tag_mappings:
             print("Warning: No API tag mappings available. Tag summary will be empty.")
             self.logger.logger.warning("No API tag mappings available for tag summary report")
-            return pd.DataFrame(columns=["CB Tag Name", "CB Tag Count"])
+            empty_df = pd.DataFrame(columns=["CB Tag Name", "CB Tag Count"])
+            return empty_df, empty_df
         
-        # Count constituents for each mapped tag name
+        # SHEET 1: Count from ALL original constituent records
+        print("  - Counting tags from ALL records...")
+        all_tag_counts = self._count_tags_from_constituents(constituents_df, tag_mappings)
+        all_records_df = self._create_tag_summary_df(all_tag_counts, "All Records")
+        
+        # SHEET 2: Count from CLEAN/VALID records only
+        clean_records_df = pd.DataFrame(columns=["CB Tag Name", "CB Tag Count"])
+        if output_df is not None:
+            print("  - Counting tags from CLEAN records only...")
+            # Get valid record IDs
+            valid_ids = set()
+            for index, row in output_df.iterrows():
+                row_data = row.to_dict()
+                validation_errors = VendorValidationRules.validate_Vendor_row(row_data)
+                if not validation_errors:
+                    valid_ids.add(row_data.get(VendorOutputColumns.CB_CONSTITUENT_ID.value))
+            
+            # Filter constituents to only valid IDs
+            valid_constituents_df = constituents_df[constituents_df["Patron ID"].isin(valid_ids)]
+            clean_tag_counts = self._count_tags_from_constituents(valid_constituents_df, tag_mappings)
+            clean_records_df = self._create_tag_summary_df(clean_tag_counts, "Clean Records")
+        
+        print(f"Tag summary report generated:")
+        print(f"  - All Records: {len(all_records_df)} unique API-mapped tags")
+        print(f"  - Clean Records: {len(clean_records_df)} unique API-mapped tags")
+        
+        return all_records_df, clean_records_df
+    
+    def _count_tags_from_constituents(self, constituents_df: pd.DataFrame, tag_mappings: Dict[str, str]) -> dict:
+        """Helper method to count tags from a dataframe of constituents"""
         mapped_tag_counts = {}
         
-        # Iterate through original constituent records
         for index, row in constituents_df.iterrows():
             original_tags_str = row.get("Tags", "")
             
@@ -1073,7 +1105,6 @@ class VendorValidator:
                 
                 # Check if this original tag exists in the API mappings
                 if normalized_tag in tag_mappings:
-                    # Get the mapped name from API
                     mapped_name = tag_mappings[normalized_tag]
                     constituent_mapped_tags.add(mapped_name)
             
@@ -1081,10 +1112,14 @@ class VendorValidator:
             for mapped_tag in constituent_mapped_tags:
                 mapped_tag_counts[mapped_tag] = mapped_tag_counts.get(mapped_tag, 0) + 1
         
+        return mapped_tag_counts
+    
+    def _create_tag_summary_df(self, tag_counts: dict, sheet_type: str) -> pd.DataFrame:
+        """Helper method to create a sorted dataframe from tag counts"""
         # Convert to dataframe and sort by count (descending)
         tag_summary_data = [
             {"CB Tag Name": tag, "CB Tag Count": count}
-            for tag, count in sorted(mapped_tag_counts.items(), key=lambda x: x[1], reverse=True)
+            for tag, count in sorted(tag_counts.items(), key=lambda x: x[1], reverse=True)
         ]
         
         tag_summary_df = pd.DataFrame(tag_summary_data)
@@ -1092,15 +1127,10 @@ class VendorValidator:
         # If no tags found, create empty dataframe with correct columns
         if tag_summary_df.empty:
             tag_summary_df = pd.DataFrame(columns=["CB Tag Name", "CB Tag Count"])
-            print("No original tags matched the API mappings")
-        else:
-            print(f"Tag summary report generated: {len(tag_summary_df)} unique API-mapped tags found")
         
-        self.logger.logger.info(f"Tag summary report: {len(tag_summary_df)} API-mapped tags identified from original data")
-        
-        # Log all mapped tags with counts
+        # Log the results
         if not tag_summary_df.empty:
-            self.logger.logger.info("API-Mapped Tags by Constituent Count (from original tags):")
+            self.logger.logger.info(f"API-Mapped Tags by Constituent Count ({sheet_type}):")
             for idx, row in tag_summary_df.iterrows():
                 self.logger.logger.info(f"  {row['CB Tag Name']}: {row['CB Tag Count']} constituents")
         
