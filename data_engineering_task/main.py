@@ -106,11 +106,20 @@ def main():
         print(f"Clean file contains {len(valid_records_df)} valid records out of {len(output_df)} total")
         
         # Generate and save tag summary report (matching original tags to API)
-        tag_summary_df = Vendor_validator.generate_tag_summary_report(constituents_df, tag_mappings)
+        # Returns 2 dataframes: one for all records, one for clean records only
+        all_records_tag_df, clean_records_tag_df = Vendor_validator.generate_tag_summary_report(
+            constituents_df, tag_mappings, output_df
+        )
+        
+        # Save both sheets to one Excel file
         tag_summary_filename = f"Constituent_tag_count_{timestamp}.xlsx"
-        tag_summary_df.to_excel(tag_summary_filename, index=False)
+        with pd.ExcelWriter(tag_summary_filename, engine='openpyxl') as writer:
+            all_records_tag_df.to_excel(writer, sheet_name='All Records', index=False)
+            clean_records_tag_df.to_excel(writer, sheet_name='Clean Records', index=False)
+        
         print(f"Tag summary report saved to: {tag_summary_filename}")
-        print(f"Tag summary contains {len(tag_summary_df)} unique API-mapped tags")
+        print(f"  - All Records: {len(all_records_tag_df)} unique API-mapped tags")
+        print(f"  - Clean Records: {len(clean_records_tag_df)} unique API-mapped tags")
         
         # Step 5: Final Summary
         print("\n" + "="*60)
