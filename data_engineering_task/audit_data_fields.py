@@ -37,6 +37,26 @@ class VendorOutputColumns(str, Enum):
     CB_LIFETIME_DONATION = "CB Lifetime Donation Amount"
     CB_RECENT_DONATION_DATE = "CB Most Recent Donation Date"
     CB_RECENT_DONATION_AMOUNT = "CB Most Recent Donation Amount"
+    
+    @classmethod
+    def get_ordered_columns(cls) -> List[str]:
+        """Return columns in the exact order for output file"""
+        return [
+            cls.CB_CONSTITUENT_ID.value,
+            cls.CB_CONSTITUENT_TYPE.value,
+            cls.CB_FIRST_NAME.value,
+            cls.CB_LAST_NAME.value,
+            cls.CB_COMPANY_NAME.value,
+            cls.CB_CREATED_AT.value,
+            cls.CB_EMAIL_1.value,
+            cls.CB_EMAIL_2.value,
+            cls.CB_TITLE.value,
+            cls.CB_TAGS.value,
+            cls.CB_BACKGROUND_INFO.value,
+            cls.CB_LIFETIME_DONATION.value,
+            cls.CB_RECENT_DONATION_DATE.value,
+            cls.CB_RECENT_DONATION_AMOUNT.value
+        ]
 
 
 class FieldMappingRules:
@@ -71,13 +91,57 @@ class FieldMappingRules:
             return "Person"  # Default to Person if unclear
     
     @classmethod
-    def get_constituent_emails(cls, patron_id: int, emails_df: pd.DataFrame) -> tuple:
-        """Get up to 2 emails for a constituent from Input Emails sheet"""
+    def get_constituent_emails(cls, patron_id: int, emails_df: pd.DataFrame, primary_email: str = "") -> tuple:
+        """
+        Get up to 2 emails for a constituent with priority logic based on email count
+        
+        BUSINESS RULE:
+        If constituent has MORE THAN 3 emails in Input Emails sheet:
+          1. CB Email 1 = Primary Email from Input Constituents sheet
+          2. CB Email 2 = 1st email from Input Emails sheet (earliest row)
+          3. Remaining emails from Input Emails are ignored
+        
+        If constituent has 3 OR FEWER emails:
+          1. CB Email 1 = First email from Input Emails sheet
+          2. CB Email 2 = Second email from Input Emails sheet
+          3. If no emails in Input Emails, use Primary Email as fallback for CB Email 1
+        
+        Args:
+            patron_id: Constituent's Patron ID
+            emails_df: Input Emails dataframe  
+            primary_email: Primary Email from Input Constituents sheet
+            
+        Returns:
+            tuple: (email_1, email_2) - Both standardized and cleaned
+        
+        Examples:
+            Patron has 5 emails (>3):
+              Primary Email: "john@company.com"
+              Input Emails: ["john.doe@gmail.com", "j.doe@work.com", ...]
+              Result: ("john@company.com", "john.doe@gmail.com")
+            
+            Patron has 2 emails (<=3):
+              Primary Email: "mary@company.com"
+              Input Emails: ["mary.smith@gmail.com", "msmith@work.com"]
+              Result: ("mary.smith@gmail.com", "msmith@work.com")
+        """
+        # Get all emails for this patron from Input Emails sheet (already cleaned)
         constituent_emails = emails_df[emails_df["Patron ID"] == patron_id]["Email"].tolist()
         
-        # Return first two emails, or empty strings if not available
-        email_1 = constituent_emails[0] if len(constituent_emails) > 0 else ""
-        email_2 = constituent_emails[1] if len(constituent_emails) > 1 else ""
+        # Filter out empty/invalid emails
+        constituent_emails = [email for email in constituent_emails if email and str(email).strip()]
+        
+        email_count = len(constituent_emails)
+        
+        # CASE 1: More than 3 emails -> Prioritize Primary Email from Constituents
+        if email_count > 3:
+            email_1 = primary_email if primary_email and str(primary_email).strip() else ""
+            email_2 = constituent_emails[0] if len(constituent_emails) > 0 else ""
+        
+        # CASE 2: 3 or fewer emails -> Use Input Emails order, Primary as fallback
+        else:
+            email_1 = constituent_emails[0] if len(constituent_emails) > 0 else (primary_email if primary_email else "")
+            email_2 = constituent_emails[1] if len(constituent_emails) > 1 else ""
         
         return email_1, email_2
     
@@ -254,18 +318,30 @@ class DataCleaner:
     @classmethod
     def clean_and_standardize_dataframes(cls, constituents_df: pd.DataFrame, 
                                        emails_df: pd.DataFrame, 
-                                       donations_df: pd.DataFrame) -> tuple:
-        """Clean and standardize all three input dataframes"""
+                                       donations_df: pd.DataFrame,
+                                       tag_mappings: Dict[str, str] = None) -> tuple:
+        """
+        Clean and standardize all three input dataframes
+        
+        Args:
+            constituents_df: Input Constituents dataframe
+            emails_df: Input Emails dataframe
+            donations_df: Input Donation History dataframe
+            tag_mappings: Dictionary mapping normalized tag names to mapped names (from API)
+        
+        Returns:
+            Tuple of (clean_constituents, clean_emails, clean_donations)
+        """
         
         # Clean each dataframe
-        clean_constituents = cls.clean_constituents_data(constituents_df.copy())
+        clean_constituents = cls.clean_constituents_data(constituents_df.copy(), tag_mappings)
         clean_emails = cls.clean_emails_data(emails_df.copy())
         clean_donations = cls.clean_donations_data(donations_df.copy())
         
         return clean_constituents, clean_emails, clean_donations
     
     @classmethod
-    def clean_constituents_data(cls, df: pd.DataFrame) -> pd.DataFrame:
+    def clean_constituents_data(cls, df: pd.DataFrame, tag_mappings: Dict[str, str] = None) -> pd.DataFrame:
         """
         Clean and standardize Input Constituents data
         
@@ -276,7 +352,12 @@ class DataCleaner:
         - Standardizes email addresses (lowercase, removes spaces)
         - Standardizes salutation/title values
         - Cleans and standardizes tags
+        - Maps tags using API-provided mappings (if available)
         - Standardizes timestamp format
+        
+        Args:
+            df: Input Constituents dataframe
+            tag_mappings: Optional dictionary mapping normalized tag names to mapped names (from API)
         """
         
         # Trim whitespace from all string columns
@@ -304,9 +385,14 @@ class DataCleaner:
         if "Company" in df.columns:
             df["Company"] = df["Company"].apply(cls.standardize_company_name)
         
-        # Clean tags (remove extra spaces, standardize separators)
+        # Clean and map tags using API mappings
         if "Tags" in df.columns:
-            df["Tags"] = df["Tags"].apply(cls.standardize_tags)
+            if tag_mappings:
+                # Apply API-based tag mapping
+                df["Tags"] = df["Tags"].apply(lambda tags: cls.map_tags_with_api(tags, tag_mappings))
+            else:
+                # Just standardize tags without mapping
+                df["Tags"] = df["Tags"].apply(cls.standardize_tags)
         
         # Standardize date format for Date Entered
         if "Date Entered" in df.columns:
@@ -512,6 +598,65 @@ class DataCleaner:
         return ', '.join(tag_list)
     
     @classmethod
+    def map_tags_with_api(cls, tags: str, tag_mappings: Dict[str, str]) -> str:
+        """
+        Map tags using API-provided tag mapping dictionary
+        
+        Process:
+        1. Split comma-separated tags
+        2. Normalize each tag (lowercase, trim whitespace)
+        3. Look up in API mapping dictionary
+        4. Use mapped_name if found, else keep original
+        5. Filter out empty tags
+        6. Join back with comma separator
+        
+        Args:
+            tags: Comma-separated string of tags
+            tag_mappings: Dictionary mapping normalized tag names to mapped names
+                         (from API: name -> mapped_name)
+        
+        Returns:
+            Comma-separated string of mapped tags
+        
+        Examples:
+            Input: "Donor, volunteer, VIP"
+            API mappings: {"donor": "Major Donor", "volunteer": "Active Volunteer"}
+            Output: "Major Donor, Active Volunteer, VIP"
+        """
+        if not tags or tags == 'nan' or str(tags).strip() == '':
+            return ''
+        
+        if not tag_mappings:
+            # No mappings available, return standardized tags
+            return cls.standardize_tags(tags)
+        
+        tags_str = str(tags).strip()
+        
+        # Split by comma and process each tag
+        mapped_tags = []
+        for tag in tags_str.split(','):
+            # Clean and normalize the tag
+            cleaned_tag = tag.strip()
+            
+            # Skip empty tags
+            if not cleaned_tag:
+                continue
+            
+            # Normalize for lookup (lowercase, trimmed)
+            normalized_tag = cleaned_tag.lower().strip()
+            
+            # Look up in API mapping dictionary
+            if normalized_tag in tag_mappings:
+                # Use mapped name from API
+                mapped_tag = tag_mappings[normalized_tag]
+                mapped_tags.append(mapped_tag)
+            else:
+                # Keep original tag if no mapping exists
+                mapped_tags.append(cleaned_tag)
+        
+        return ', '.join(mapped_tags)
+    
+    @classmethod
     def standardize_payment_method(cls, method: str) -> str:
         """Standardize payment method"""
         if not method or method == 'nan' or method.strip() == '':
@@ -611,13 +756,26 @@ class DataCombiner:
     
     @classmethod
     def combine_data(cls, constituents_df: pd.DataFrame, emails_df: pd.DataFrame, 
-                    donations_df: pd.DataFrame) -> pd.DataFrame:
-        """Combine the three input sheets into Vendor output format with cleaning"""
+                    donations_df: pd.DataFrame, tag_mappings: Dict[str, str] = None) -> pd.DataFrame:
+        """
+        Combine the three input sheets into Vendor output format with cleaning
+        
+        Args:
+            constituents_df: Input Constituents dataframe
+            emails_df: Input Emails dataframe
+            donations_df: Input Donation History dataframe
+            tag_mappings: Dictionary mapping normalized tag names to mapped names (from API)
+        
+        Returns:
+            DataFrame in Vendor output format
+        """
         
         # First, clean and standardize all input data
         print("Cleaning and standardizing input data...")
+        if tag_mappings:
+            print(f"Applying {len(tag_mappings)} tag mappings from API...")
         clean_constituents, clean_emails, clean_donations = DataCleaner.clean_and_standardize_dataframes(
-            constituents_df, emails_df, donations_df
+            constituents_df, emails_df, donations_df, tag_mappings
         )
         print("Data cleaning completed")
         
@@ -637,12 +795,11 @@ class DataCombiner:
             # Determine constituent type
             output_row[VendorOutputColumns.CB_CONSTITUENT_TYPE.value] = FieldMappingRules.determine_constituent_type(constituent_row.to_dict())
             
-            # Get emails from cleaned Input Emails sheet
-            email_1, email_2 = FieldMappingRules.get_constituent_emails(patron_id, clean_emails)
+            # Get Primary Email from constituent
+            primary_email = constituent_row.get("Primary Email", "")
             
-            # Use Primary Email from constituents as Email 1 if no emails in emails sheet
-            if not email_1 and constituent_row.get("Primary Email"):
-                email_1 = constituent_row["Primary Email"]
+            # Get emails from cleaned Input Emails sheet with priority logic
+            email_1, email_2 = FieldMappingRules.get_constituent_emails(patron_id, clean_emails, primary_email)
             
             output_row[VendorOutputColumns.CB_EMAIL_1.value] = email_1
             output_row[VendorOutputColumns.CB_EMAIL_2.value] = email_2
@@ -665,6 +822,10 @@ class DataCombiner:
         for column in VendorOutputColumns:
             if column.value not in output_df.columns:
                 output_df[column.value] = ""
+        
+        # Reorder columns to match the specified output format
+        ordered_columns = VendorOutputColumns.get_ordered_columns()
+        output_df = output_df[ordered_columns]
         
         return output_df
 
@@ -771,11 +932,23 @@ class VendorValidator:
     
     def validate_and_transform_data(self, constituents_df: pd.DataFrame, 
                                   emails_df: pd.DataFrame, 
-                                  donations_df: pd.DataFrame) -> pd.DataFrame:
-        """Complete data transformation and validation with logging"""
+                                  donations_df: pd.DataFrame,
+                                  tag_mappings: Dict[str, str] = None) -> pd.DataFrame:
+        """
+        Complete data transformation and validation with logging
+        
+        Args:
+            constituents_df: Input Constituents dataframe
+            emails_df: Input Emails dataframe
+            donations_df: Input Donation History dataframe
+            tag_mappings: Dictionary mapping normalized tag names to mapped names (from API)
+        
+        Returns:
+            DataFrame in Vendor output format with all records (valid and invalid)
+        """
         
         # Step 1: Clean and combine data
-        output_df = DataCombiner.combine_data(constituents_df, emails_df, donations_df)
+        output_df = DataCombiner.combine_data(constituents_df, emails_df, donations_df, tag_mappings)
         
         # Log cleaning summary
         self.logger.log_cleaning_summary(len(constituents_df), len(emails_df), len(donations_df))
@@ -849,6 +1022,89 @@ class VendorValidator:
         print(f"Filtered {len(valid_df)} valid records from {len(output_df)} total records")
         
         return valid_df
+    
+    def generate_tag_summary_report(self, constituents_df: pd.DataFrame, tag_mappings: Dict[str, str] = None) -> pd.DataFrame:
+        """
+        Generate tag summary report by matching ORIGINAL INPUT tags against API and counting constituents
+        
+        Process:
+        1. Read ORIGINAL tags from Input Constituents sheet (before mapping)
+        2. Normalize and match against API's "name" field
+        3. Count how many constituents have tags that match the API
+        4. Show the API's "mapped_name" with the constituent count
+        
+        Args:
+            constituents_df: Original Input Constituents dataframe (BEFORE transformation)
+            tag_mappings: Dictionary of API tag mappings (normalized name -> mapped_name)
+            
+        Returns:
+            DataFrame with columns: CB Tag Name (mapped_name), CB Tag Count
+        """
+        print("Generating tag summary report (matching original tags to API)...")
+        
+        if not tag_mappings:
+            print("Warning: No API tag mappings available. Tag summary will be empty.")
+            self.logger.logger.warning("No API tag mappings available for tag summary report")
+            return pd.DataFrame(columns=["CB Tag Name", "CB Tag Count"])
+        
+        # Count constituents for each mapped tag name
+        mapped_tag_counts = {}
+        
+        # Iterate through original constituent records
+        for index, row in constituents_df.iterrows():
+            original_tags_str = row.get("Tags", "")
+            
+            # Skip empty tags
+            if not original_tags_str or str(original_tags_str).strip() == "" or str(original_tags_str).strip().lower() == "nan":
+                continue
+            
+            # Split original tags by comma
+            original_tags = [tag.strip() for tag in str(original_tags_str).split(',') if tag.strip()]
+            
+            # Track which mapped tags this constituent has (use set to avoid double-counting)
+            constituent_mapped_tags = set()
+            
+            for original_tag in original_tags:
+                if not original_tag:
+                    continue
+                
+                # Normalize the original tag (lowercase, trim) to match against API
+                normalized_tag = original_tag.lower().strip()
+                
+                # Check if this original tag exists in the API mappings
+                if normalized_tag in tag_mappings:
+                    # Get the mapped name from API
+                    mapped_name = tag_mappings[normalized_tag]
+                    constituent_mapped_tags.add(mapped_name)
+            
+            # Count this constituent for each unique mapped tag they have
+            for mapped_tag in constituent_mapped_tags:
+                mapped_tag_counts[mapped_tag] = mapped_tag_counts.get(mapped_tag, 0) + 1
+        
+        # Convert to dataframe and sort by count (descending)
+        tag_summary_data = [
+            {"CB Tag Name": tag, "CB Tag Count": count}
+            for tag, count in sorted(mapped_tag_counts.items(), key=lambda x: x[1], reverse=True)
+        ]
+        
+        tag_summary_df = pd.DataFrame(tag_summary_data)
+        
+        # If no tags found, create empty dataframe with correct columns
+        if tag_summary_df.empty:
+            tag_summary_df = pd.DataFrame(columns=["CB Tag Name", "CB Tag Count"])
+            print("No original tags matched the API mappings")
+        else:
+            print(f"Tag summary report generated: {len(tag_summary_df)} unique API-mapped tags found")
+        
+        self.logger.logger.info(f"Tag summary report: {len(tag_summary_df)} API-mapped tags identified from original data")
+        
+        # Log all mapped tags with counts
+        if not tag_summary_df.empty:
+            self.logger.logger.info("API-Mapped Tags by Constituent Count (from original tags):")
+            for idx, row in tag_summary_df.iterrows():
+                self.logger.logger.info(f"  {row['CB Tag Name']}: {row['CB Tag Count']} constituents")
+        
+        return tag_summary_df
 
 
 class ValidationSummary(BaseModel):
