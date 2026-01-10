@@ -10,6 +10,7 @@ import numpy as np
 import os
 import logging
 import smtplib
+import requests
 from datetime import datetime
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -17,7 +18,7 @@ from email.mime.base import MIMEBase
 from email import encoders
 from pydantic import BaseModel, Field, field_validator, ValidationError, ConfigDict
 from enum import Enum
-from typing import List, Optional, Any
+from typing import List, Optional, Any, Dict
 from dotenv import load_dotenv
 
 # Load environment variables
@@ -102,10 +103,26 @@ class DonationRecord(BaseModel):
         return v
 
 
+class TagRecord(BaseModel):
+    """Pydantic model for validating API tag response"""
+    model_config = ConfigDict(populate_by_name=True)
+    
+    id: str = Field(...)
+    name: str = Field(...)
+    mapped_name: str = Field(...)
+    
+    @field_validator('name', 'mapped_name')
+    @classmethod
+    def validate_not_empty(cls, v):
+        if not v or not v.strip():
+            raise ValueError('Field cannot be empty')
+        return v.strip()
+
+
 class EmailConfig(BaseModel):
     """Email configuration for sending validation reports"""
     smtp_server: str = Field(default="smtp.gmail.com")
-    smtp_port: int = Field(default=587)
+    smtp_port: int = Field(default=465)  # Use 465 (SSL) instead of 587 (STARTTLS) for better compatibility
     sender_email: str = Field(...)
     sender_password: str = Field(...)
     recipient_email: str = Field(...)
@@ -115,7 +132,7 @@ class EmailConfig(BaseModel):
         """Create EmailConfig from environment variables"""
         return cls(
             smtp_server=os.getenv('SMTP_SERVER', 'smtp.gmail.com'),
-            smtp_port=int(os.getenv('SMTP_PORT', '587')),
+            smtp_port=int(os.getenv('SMTP_PORT', '465')),  # Default to 465 (SSL) for better compatibility
             sender_email=os.getenv('SENDER_EMAIL', ''),
             sender_password=os.getenv('SENDER_PASSWORD', ''),
             recipient_email=os.getenv('RECIPIENT_EMAIL', '')
@@ -133,6 +150,9 @@ class DataValidator:
         self.donations_df = None
         # Track validation errors
         self.total_validation_errors = 0
+        # API validation results
+        self.api_validation_result = None
+        self.tag_mappings = {}  # Tag mappings from API (normalized name -> mapped_name)
         # Set up logging for invalid records
         self.setup_logging()
     
@@ -190,6 +210,137 @@ class DataValidator:
         
         print(f"All 3 required input sheets found: {required_sheets}")
     
+    def validate_api_connection(self, api_url: str = None, timeout: int = 10) -> Dict[str, Any]:
+        """
+        Validate API connection and response schema, and build tag mapping dictionary
+        
+        Args:
+            api_url: The API endpoint URL (defaults to API_URL from .env)
+            timeout: Request timeout in seconds
+            
+        Returns:
+            Dictionary with validation results and tag_mappings:
+            {
+                'success': bool,
+                'records_count': int,
+                'valid_records': int,
+                'invalid_records': int,
+                'errors': list,
+                'tag_mappings': dict  # Normalized tag name -> mapped_name
+            }
+        """
+        # Use API URL from environment variable if not provided
+        if api_url is None:
+            api_url = os.getenv('API_URL', 'https://6719768f7fc4c5ff8f4d84f1.mockapi.io/api/v1/tags')
+        
+        result = {
+            'success': False,
+            'records_count': 0,
+            'valid_records': 0,
+            'invalid_records': 0,
+            'errors': [],
+            'tag_mappings': {}  # Will store normalized tag mappings
+        }
+        
+        try:
+            print(f"\nTesting API connection: {api_url}")
+            self.logger.info(f"Testing API connection: {api_url}")
+            
+            # Make API request
+            response = requests.get(api_url, timeout=timeout)
+            
+            if response.status_code == 200:
+                print(f"API Response: HTTP {response.status_code} - Success")
+                self.logger.info(f"API Response: HTTP {response.status_code} - Success")
+                
+                # Parse JSON response
+                data = response.json()
+                
+                if not isinstance(data, list):
+                    error_msg = "API response is not a list"
+                    result['errors'].append(error_msg)
+                    print(f"Error: {error_msg}")
+                    self.logger.error(error_msg)
+                    return result
+                
+                result['records_count'] = len(data)
+                print(f"API returned {len(data)} records")
+                self.logger.info(f"API returned {len(data)} records")
+                
+                # Validate each record against schema and build tag mapping
+                valid_count = 0
+                invalid_count = 0
+                tag_mappings = {}
+                
+                for idx, record in enumerate(data):
+                    try:
+                        # Validate with Pydantic model
+                        tag_record = TagRecord(**record)
+                        valid_count += 1
+                        
+                        # Build normalized tag mapping (case-insensitive, trimmed)
+                        # Key: normalized original name, Value: mapped_name
+                        original_name = tag_record.name.strip()
+                        mapped_name = tag_record.mapped_name.strip()
+                        
+                        # Store with normalized key (lowercase, trimmed)
+                        normalized_key = original_name.lower().strip()
+                        tag_mappings[normalized_key] = mapped_name
+                        
+                        self.logger.info(f"Tag mapping added: '{original_name}' -> '{mapped_name}'")
+                        
+                    except ValidationError as e:
+                        invalid_count += 1
+                        error_msg = f"Record {idx + 1}: Schema validation failed - {e}"
+                        result['errors'].append(error_msg)
+                        self.logger.error(f"API Record {idx + 1} - Validation Error:")
+                        self.logger.error(f"  Record Data: {record}")
+                        self.logger.error(f"  Error: {e}")
+                
+                result['valid_records'] = valid_count
+                result['invalid_records'] = invalid_count
+                result['success'] = invalid_count == 0
+                result['tag_mappings'] = tag_mappings
+                
+                # Log summary
+                print(f"API Validation Summary:")
+                print(f"  - Total records: {len(data)}")
+                print(f"  - Valid records: {valid_count}")
+                print(f"  - Invalid records: {invalid_count}")
+                print(f"  - Tag mappings built: {len(tag_mappings)}")
+                
+                if result['success']:
+                    print("API validation passed - All records match expected schema")
+                    self.logger.info("API validation passed - All records match expected schema")
+                    self.logger.info(f"Built {len(tag_mappings)} tag mappings for transformation")
+                else:
+                    print(f"API validation completed with {invalid_count} schema mismatches")
+                    self.logger.warning(f"API validation completed with {invalid_count} schema mismatches")
+                
+            else:
+                error_msg = f"API returned HTTP {response.status_code} - {response.reason}"
+                result['errors'].append(error_msg)
+                print(f"Error: {error_msg}")
+                self.logger.error(error_msg)
+                
+        except requests.exceptions.Timeout:
+            error_msg = f"API request timed out after {timeout} seconds"
+            result['errors'].append(error_msg)
+            print(f"Error: {error_msg}")
+            self.logger.error(error_msg)
+        except requests.exceptions.ConnectionError:
+            error_msg = "Failed to connect to API - Check your internet connection"
+            result['errors'].append(error_msg)
+            print(f"Error: {error_msg}")
+            self.logger.error(error_msg)
+        except Exception as e:
+            error_msg = f"Unexpected error during API validation: {str(e)}"
+            result['errors'].append(error_msg)
+            print(f"Error: {error_msg}")
+            self.logger.error(error_msg)
+        
+        return result
+    
     def validate_dataframe_columns(self, df: pd.DataFrame, expected_columns: List[str], sheet_name: str) -> None:
         """Validate that DataFrame has all expected columns"""
         actual_columns = set(df.columns)
@@ -227,6 +378,18 @@ class DataValidator:
         print(f"Loaded {len(self.constituents_df)} constituents")
         print(f"Loaded {len(self.emails_df)} email records")
         print(f"Loaded {len(self.donations_df)} donation records")
+        
+        # Validate API connection and get tag mappings
+        print("\nValidating API connection and retrieving tag mappings...")
+        self.api_validation_result = self.validate_api_connection()
+        
+        if self.api_validation_result['success']:
+            self.tag_mappings = self.api_validation_result['tag_mappings']
+            print(f"Successfully retrieved {len(self.tag_mappings)} tag mappings from API")
+        else:
+            print("API validation failed or returned no tag mappings")
+            self.logger.warning("API validation issues detected - proceeding without tag mappings")
+            self.tag_mappings = {}
         
         # Clean data (convert nan to None) before validation
         self.clean_data()
@@ -373,6 +536,15 @@ class DataValidator:
         """Check if there were any validation errors during the process"""
         return self.total_validation_errors > 0
     
+    def get_tag_mappings(self) -> Dict[str, str]:
+        """
+        Get tag mappings from API validation
+        
+        Returns:
+            Dictionary mapping normalized tag names to mapped names
+        """
+        return self.tag_mappings
+    
     def send_email_report(self, email_config: Optional[EmailConfig] = None, additional_attachments: List[str] = None, vendor_summary: dict = None, include_metadata_log: bool = True) -> bool:
         """Send validation log file and additional attachments via email"""
         try:
@@ -432,13 +604,16 @@ Vendor Transformation:
 ------------------------------------------------------------------------
 ATTACHED FILES ({len(additional_attachments) if additional_attachments else 0}):
 
-1. Vendor_Complete_Output.xlsx
-   All {vendor_summary.get('total_records', 0)} records included
+1. Constituent_Unclean.xlsx
+   All {vendor_summary.get('total_records', 0)} records included (valid + invalid)
 
-2. Vendor_Clean_Records.xlsx  
+2. Constituent_Clean.xlsx  
    Only {vendor_summary.get('valid_records', 0)} validated records (ready to import)
 
-3. Vendor_transformation.log
+3. Constituent_tag_count.xlsx
+   Tag usage statistics showing each tag and constituent count
+
+4. Vendor_transformation.log
    Error details for {vendor_summary.get('invalid_records', 0)} invalid records
 
 ------------------------------------------------------------------------
@@ -539,9 +714,17 @@ This is an automated message.
                         print(f"Additional file not found: {file_path}")
                         self.logger.warning(f"Additional file not found: {file_path}")
             
-            # Send email
-            server = smtplib.SMTP(email_config.smtp_server, email_config.smtp_port)
-            server.starttls()
+            # Send email with timeout and SSL/TLS support
+            if email_config.smtp_port == 465:
+                # Use SSL for port 465
+                import ssl
+                context = ssl.create_default_context()
+                server = smtplib.SMTP_SSL(email_config.smtp_server, email_config.smtp_port, timeout=30, context=context)
+            else:
+                # Use STARTTLS for port 587
+                server = smtplib.SMTP(email_config.smtp_server, email_config.smtp_port, timeout=30)
+                server.starttls()
+            
             server.login(email_config.sender_email, email_config.sender_password)
             text = msg.as_string()
             server.sendmail(email_config.sender_email, email_config.recipient_email, text)
