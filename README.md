@@ -360,9 +360,7 @@ data_engineering_task/
 - Check sheet names match exactly (case-sensitive)
 - Verify all required columns present
 - Review log files for specific errors
-- Close Excel files before running
 
-**users**: Close ALL Excel files before running the pipeline!
 
 
 
