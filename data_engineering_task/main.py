@@ -2,35 +2,91 @@ from audit_metadata import DataValidator, EmailConfig
 from audit_data_fields import VendorValidator, InputSheets
 import pandas as pd
 import os
+import gdown
+from dotenv import load_dotenv
+
+load_dotenv()
+
+
+def download_from_google_drive(file_id, output_path):
+    try:
+        print(f"Downloading file from Google Drive...")
+        print(f"File ID: {file_id}")
+        
+        url = f"https://drive.google.com/uc?id={file_id}&export=download"
+        
+        print("Downloading file...")
+        gdown.download(url, output_path, quiet=False, fuzzy=True)
+        print(f"File downloaded successfully to: {output_path}")
+        return output_path
+            
+    except Exception as e:
+        print(f"Error downloading from Google Drive: {e}")
+        print("\nTroubleshooting:")
+        print("1. Make sure the file sharing is set to 'Anyone with the link can view'")
+        print("2. Verify the file ID is correct")
+        print("3. Check your internet connection")
+        raise
+
+
+def extract_file_id_from_url(url):
+    import re
+    match = re.search(r'/d/([a-zA-Z0-9_-]+)', url)
+    if match:
+        return match.group(1)
+    return None
 
 
 def main():
-    """Complete data processing workflow with conditional execution based on metadata validation"""
-    excel_file_path = r"C:\Users\devmi\Downloads\Copy of Data Import Assignment.xlsx"
+    local_file_path = os.getenv("LOCAL_FILE_PATH")
+    gdrive_url = os.getenv("GDRIVE_URL")
+    gdrive_file_id = os.getenv("GDRIVE_FILE_ID")
     
-    # Email configuration - set send_email=True to enable email sending
-    send_email = True  # Email enabled - requires .env file with email settings
+    if local_file_path and os.path.exists(local_file_path):
+        print(f"Using local file: {local_file_path}")
+        excel_file_path = local_file_path
+    elif gdrive_url:
+        file_id = extract_file_id_from_url(gdrive_url)
+        if not file_id:
+            print("ERROR: Could not extract file ID from GDRIVE_URL")
+            return
+        print("Downloading input file from Google Drive")
+        print(f"URL: {gdrive_url}")
+        print(f"File ID: {file_id}")
+        print("="*60)
+        excel_file_path = "input_data.xlsx"
+        download_from_google_drive(file_id, excel_file_path)
+        print("="*60)
+    elif gdrive_file_id:
+        print("Downloading input file from Google Drive")
+        print("="*60)
+        excel_file_path = "input_data.xlsx"
+        download_from_google_drive(gdrive_file_id, excel_file_path)
+        print("="*60)
+    else:
+        print("ERROR: No input file configured")
+        print("Either set LOCAL_FILE_PATH, GDRIVE_URL, or GDRIVE_FILE_ID in .env file")
+        return
+    
+    send_email = True
     
     try:
         print("Starting Data Processing Workflow")
         print("="*60)
         
-        # Step 1: Metadata Validation (Critical - Must Pass)
         print("STEP 1: Metadata Validation (Input Data)")
         print("This step validates the structure and quality of input data.")
         print("If ANY errors are found, the process will stop here.")
         print("-"*60)
         
         metadata_validator = DataValidator(excel_file_path)
-        metadata_validator.run_validation(send_email=False)  # Don't send email yet
+        metadata_validator.run_validation(send_email=False)
         
-        # Check if there were any validation errors in metadata
         has_metadata_errors = metadata_validator.has_validation_errors()
         
         print("\n" + "="*60)
         
         if has_metadata_errors:
-            # STOP HERE - Metadata has errors
             print("METADATA VALIDATION FAILED!")
             print("="*60)
             print("Critical errors found in input data (metadata).")
@@ -38,7 +94,6 @@ def main():
             print("Please fix the input data issues before proceeding.")
             print("="*60)
             
-            # Send email with metadata validation errors only
             if send_email:
                 print("\nSending Metadata Validation Error Report...")
                 success = metadata_validator.send_email_report()
@@ -52,19 +107,17 @@ def main():
             print("\n" + "="*60)
             print("WORKFLOW STOPPED DUE TO METADATA ERRORS")
             print("="*60)
-            return  # Exit here - do not proceed to Vendor transformation
+            return
         
-        # If we reach here, metadata validation passed - proceed to Vendor transformation
         print("METADATA VALIDATION PASSED!")
         print("="*60)
         print("All input data is valid. Proceeding to Vendor transformation...")
         print("="*60)
         
-        # Step 2: Load data for Vendor transformation
         print("\nSTEP 2: Loading Data for Vendor Transformation")
-        constituents_df = pd.read_excel(excel_file_path, sheet_name=InputSheets.INPUT_CONSTITUENTS.value)
-        emails_df = pd.read_excel(excel_file_path, sheet_name=InputSheets.INPUT_EMAILS.value)
-        donations_df = pd.read_excel(excel_file_path, sheet_name=InputSheets.INPUT_DONATION_HISTORY.value)
+        constituents_df = pd.read_excel(excel_file_path, sheet_name=InputSheets.INPUT_CONSTITUENTS.value, engine='openpyxl')
+        emails_df = pd.read_excel(excel_file_path, sheet_name=InputSheets.INPUT_EMAILS.value, engine='openpyxl')
+        donations_df = pd.read_excel(excel_file_path, sheet_name=InputSheets.INPUT_DONATION_HISTORY.value, engine='openpyxl')
         
         print(f"Loaded {len(constituents_df)} constituents")
         print(f"Loaded {len(emails_df)} email records")
@@ -72,46 +125,37 @@ def main():
         
         print("\n" + "="*60)
         
-        # Step 3: Vendor Transformation and Validation
         print("STEP 3: Vendor Data Transformation & Validation")
         Vendor_validator = VendorValidator("Vendor_transformation")
         
-        # Get tag mappings from metadata validator (retrieved from API)
         tag_mappings = metadata_validator.get_tag_mappings()
         if tag_mappings:
             print(f"Using {len(tag_mappings)} tag mappings from API for transformation")
         else:
             print("No tag mappings available - tags will not be transformed")
         
-        # Transform and validate data (includes cleaning, combining, and validation)
         output_df = Vendor_validator.validate_and_transform_data(
             constituents_df, emails_df, donations_df, tag_mappings
         )
         
-        # Step 4: Save Vendor output files
         print("\n" + "="*60)
         print("STEP 4: Saving Vendor Output Files")
         timestamp = pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')
         
-        # Save complete output (all records - including invalid)
         complete_filename = f"Constituent_Unclean_{timestamp}.xlsx"
         output_df.to_excel(complete_filename, index=False)
         print(f"Complete Vendor output saved to: {complete_filename}")
         
-        # Filter and save only valid records
         valid_records_df = Vendor_validator.get_valid_records_only(output_df)
         clean_filename = f"Constituent_Clean_{timestamp}.xlsx"
         valid_records_df.to_excel(clean_filename, index=False)
         print(f"Clean records only saved to: {clean_filename}")
         print(f"Clean file contains {len(valid_records_df)} valid records out of {len(output_df)} total")
         
-        # Generate and save tag summary report (matching original tags to API)
-        # Returns 2 dataframes: one for all records, one for clean records only
         all_records_tag_df, clean_records_tag_df = Vendor_validator.generate_tag_summary_report(
             constituents_df, tag_mappings, output_df
         )
         
-        # Save both sheets to one Excel file
         tag_summary_filename = f"Constituent_tag_count_{timestamp}.xlsx"
         with pd.ExcelWriter(tag_summary_filename, engine='openpyxl') as writer:
             all_records_tag_df.to_excel(writer, sheet_name='All Records', index=False)
@@ -121,7 +165,6 @@ def main():
         print(f"  - All Records: {len(all_records_tag_df)} unique API-mapped tags")
         print(f"  - Clean Records: {len(clean_records_tag_df)} unique API-mapped tags")
         
-        # Step 5: Final Summary
         print("\n" + "="*60)
         print("FINAL SUMMARY")
         summary = Vendor_validator.get_validation_summary()
@@ -134,24 +177,21 @@ def main():
         print(f"Clean records file: {clean_filename}")
         print(f"Tag summary file: {tag_summary_filename}")
         
-        # Step 6: Send email with Vendor results and output files
         if send_email:
             print("\n" + "="*60)
             print("STEP 6: Sending Vendor Results Report")
             
-            # Prepare list of files to attach (Vendor output and logs)
             attachments = [
-                complete_filename,  # Complete Vendor output
-                clean_filename,     # Clean records only
-                tag_summary_filename,  # Tag summary report
-                Vendor_validator.logger.get_log_filename()  # Vendor validation log
+                complete_filename,
+                clean_filename,
+                tag_summary_filename,
+                Vendor_validator.logger.get_log_filename()
             ]
             
-            # Send comprehensive email with Vendor results and summary (without metadata log since it passed)
             success = metadata_validator.send_email_report(
                 additional_attachments=attachments,
                 vendor_summary=summary,
-                include_metadata_log=False  # Don't include metadata log when it passed without errors
+                include_metadata_log=False
             )
             
             if success:
@@ -163,9 +203,8 @@ def main():
             else:
                 print("Failed to send email report")
         
-        print("\n" + "="*60)
+       
         print("COMPLETE WORKFLOW FINISHED SUCCESSFULLY!")
-        print("="*60)
         
     except FileNotFoundError as e:
         print(f"Error: {e}")
