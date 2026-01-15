@@ -231,9 +231,9 @@ Dependencies installed:
 - `openpyxl` >= 3.0.0
 - `python-dotenv` >= 1.0.0
 
-### 4. Configure Email Settings
+### 4. Configure Settings
 
-Create `.env` file in project root:
+Create a `.env` file in the project root (do not commit it to source control):
 
 ```env
 # Email Configuration
@@ -243,7 +243,14 @@ RECIPIENT_EMAIL=recipient@example.com
 
 # SMTP Configuration (Gmail)
 SMTP_SERVER=smtp.gmail.com
-SMTP_PORT=587
+SMTP_PORT=465
+
+# API Configuration
+API_URL=https://6719768f7fc4c5ff8f4d84f1.mockapi.io/api/v1/tags
+
+# Google Drive Configuration
+# Use the full Google Sheets URL; the script will extract the file ID.
+GDRIVE_URL=https://docs.google.com/spreadsheets/d/<FILE_ID>/edit
 ```
 
 **Gmail App Password Setup**:
@@ -253,6 +260,11 @@ SMTP_PORT=587
 4. Copy 16-character password to `.env`
 
 ⚠️ **Important**: Use App Password, NOT your regular Gmail password!
+
+**Google Drive Setup**:
+1. Open the Google Sheet
+2. Click **Share** → set **Anyone with the link** to **Viewer**
+3. Copy the full URL into `GDRIVE_URL`
 
 ## Usage
 
@@ -306,10 +318,11 @@ COMPLETE WORKFLOW FINISHED SUCCESSFULLY!
 - **Workflow**: Stops immediately
 
 ### If Metadata Validation Passes (Phase 2):
-- `Vendor_Complete_Output_[timestamp].xlsx` - All records (valid + invalid)
-- `Vendor_Clean_Records_[timestamp].xlsx` - Valid records only (import this)
+- `Constituent_Unclean_[timestamp].xlsx` - All records (valid + invalid)
+- `Constituent_Clean_[timestamp].xlsx` - Valid records only (import this)
+- `Constituent_tag_count_[timestamp].xlsx` - Tag summary report (2 sheets)
 - `Vendor_transformation_[timestamp].log` - Field-level validation errors
-- **Email**: All 3 files attached with validation statistics
+- **Email**: All 4 files attached with validation statistics
 
 ## Project Structure
 
@@ -321,13 +334,14 @@ data_engineering_task/
 ├── audit_data_fields.py             # Phase 2: Business rules validation
 │
 ├── pyproject.toml                   # Dependencies
-├── .env                             # Email config (create this)
+├── .env                             # Email + Google Drive config (create this)
 ├── README.md                        # This file
 │
 ├── validation_errors_*.log          # Phase 1 logs (if errors)
 ├── Vendor_transformation_*.log      # Phase 2 logs
-├── Vendor_Complete_Output_*.xlsx    # All records
-└── Vendor_Clean_Records_*.xlsx      # Valid records only
+├── Constituent_Unclean_*.xlsx       # All records
+├── Constituent_Clean_*.xlsx         # Valid records only
+└── Constituent_tag_count_*.xlsx     # Tag summary report
 ```
 
 ## Troubleshooting
@@ -335,12 +349,12 @@ data_engineering_task/
 **Email not sending?**
 - Verify `.env` exists with correct App Password (16 characters)
 - Confirm 2-Step Verification enabled on Gmail
-- Check SMTP settings: smtp.gmail.com:587
+- Check SMTP settings: smtp.gmail.com:465
 
-**File not found?**
-- Update file path in `main.py` line 9
-- Use raw string: `r"C:\Users\..."`
-- Ensure file has `.xlsx` extension
+**File not found or download failed?**
+- Ensure the Google Sheet is shared as **Anyone with the link**
+- Confirm `GDRIVE_URL` is set and includes `/spreadsheets/d/<FILE_ID>/`
+*** End Patch}README.md
 
 **Validation errors?**
 - Check sheet names match exactly (case-sensitive)
