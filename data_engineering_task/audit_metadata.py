@@ -1,10 +1,3 @@
-#!/usr/bin/env python3
-"""
-Data Import Assignment - Audit Script
-Validates the 3 required input sheets and transforms data to Vendor format
-Uses Pydantic for robust input data validation
-"""
-
 import pandas as pd
 import numpy as np
 import os
@@ -21,19 +14,16 @@ from enum import Enum
 from typing import List, Optional, Any, Dict
 from dotenv import load_dotenv
 
-# Load environment variables
 load_dotenv()
 
 
 class RequiredInputSheets(str, Enum):
-    """Required input sheets for data processing"""
     INPUT_CONSTITUENTS = "Input Constituents"
     INPUT_EMAILS = "Input Emails"
     INPUT_DONATION_HISTORY = "Input Donation History"
 
 
 class ConstituentRecord(BaseModel):
-    """Pydantic model for validating constituent input data"""
     model_config = ConfigDict(populate_by_name=True)
     
     patron_id: int = Field(..., alias="Patron ID")
@@ -56,7 +46,6 @@ class ConstituentRecord(BaseModel):
 
 
 class EmailRecord(BaseModel):
-    """Pydantic model for validating email input data"""
     model_config = ConfigDict(populate_by_name=True)
     
     patron_id: int = Field(..., alias="Patron ID")
@@ -78,7 +67,6 @@ class EmailRecord(BaseModel):
 
 
 class DonationRecord(BaseModel):
-    """Pydantic model for validating donation input data"""
     model_config = ConfigDict(populate_by_name=True)
     
     patron_id: int = Field(..., alias="Patron ID")
@@ -189,8 +177,7 @@ class DataValidator:
         if not os.path.exists(self.excel_file_path):
             raise FileNotFoundError(f"Excel file not found: {self.excel_file_path}")
         
-        # Get sheet names
-        excel_file = pd.ExcelFile(self.excel_file_path)
+        excel_file = pd.ExcelFile(self.excel_file_path, engine='openpyxl')
         sheet_names = excel_file.sheet_names
         
         # Check specifically for the three required input sheets only
@@ -360,9 +347,9 @@ class DataValidator:
         self.validate_excel_structure()
         
         # Load the 3 required input sheets
-        self.constituents_df = pd.read_excel(self.excel_file_path, sheet_name=RequiredInputSheets.INPUT_CONSTITUENTS.value)
-        self.emails_df = pd.read_excel(self.excel_file_path, sheet_name=RequiredInputSheets.INPUT_EMAILS.value)
-        self.donations_df = pd.read_excel(self.excel_file_path, sheet_name=RequiredInputSheets.INPUT_DONATION_HISTORY.value)
+        self.constituents_df = pd.read_excel(self.excel_file_path, sheet_name=RequiredInputSheets.INPUT_CONSTITUENTS.value, engine='openpyxl')
+        self.emails_df = pd.read_excel(self.excel_file_path, sheet_name=RequiredInputSheets.INPUT_EMAILS.value, engine='openpyxl')
+        self.donations_df = pd.read_excel(self.excel_file_path, sheet_name=RequiredInputSheets.INPUT_DONATION_HISTORY.value, engine='openpyxl')
         
         # Validate column structures for the 3 required sheets
         expected_constituent_columns = ["Patron ID", "First Name", "Last Name", "Date Entered", 
@@ -769,7 +756,6 @@ This is an automated message.
         self.logger.info(f"Total emails processed: {len(self.emails_df)}")
         self.logger.info(f"Total donations processed: {len(self.donations_df)}")
         self.logger.info("="*80)
-
 
 
 
