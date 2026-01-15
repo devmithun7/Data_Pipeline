@@ -1,10 +1,3 @@
-#!/usr/bin/env python3
-"""
-Data Fields Audit Module
-Defines field mappings, validation rules, and transformation logic for combining
-Input Constituents, Input Emails, and Input Donation History into Vendor output format
-"""
-
 from enum import Enum
 from typing import Dict, List, Optional, Any
 from pydantic import BaseModel, Field
@@ -15,14 +8,12 @@ from datetime import datetime
 
 
 class InputSheets(str, Enum):
-    """Input sheet names"""
     INPUT_CONSTITUENTS = "Input Constituents"
     INPUT_EMAILS = "Input Emails"
     INPUT_DONATION_HISTORY = "Input Donation History"
 
 
 class VendorOutputColumns(str, Enum):
-    """Vendor output column definitions"""
     CB_CONSTITUENT_ID = "CB Constituent ID"
     CB_CONSTITUENT_TYPE = "CB Constituent Type"
     CB_FIRST_NAME = "CB First Name"
@@ -40,7 +31,6 @@ class VendorOutputColumns(str, Enum):
     
     @classmethod
     def get_ordered_columns(cls) -> List[str]:
-        """Return columns in the exact order for output file"""
         return [
             cls.CB_CONSTITUENT_ID.value,
             cls.CB_CONSTITUENT_TYPE.value,
@@ -60,9 +50,6 @@ class VendorOutputColumns(str, Enum):
 
 
 class FieldMappingRules:
-    """Defines how input fields map to Vendor output fields"""
-    
-    # Direct field mappings from Input Constituents
     CONSTITUENT_MAPPINGS = {
         "Patron ID": VendorOutputColumns.CB_CONSTITUENT_ID.value,
         "First Name": VendorOutputColumns.CB_FIRST_NAME.value,
@@ -76,69 +63,26 @@ class FieldMappingRules:
     
     @classmethod
     def determine_constituent_type(cls, row: dict) -> str:
-        """Determine if constituent is Person or Company based on data"""
         company = row.get("Company", "").strip() if row.get("Company") else ""
         first_name = row.get("First Name", "").strip() if row.get("First Name") else ""
         last_name = row.get("Last Name", "").strip() if row.get("Last Name") else ""
         
-        # If company field has value, it's a Company
         if company:
             return "Company"
-        # If first name or last name exists, it's a Person
         elif first_name or last_name:
             return "Person"
         else:
-            return "Person"  # Default to Person if unclear
+            return "Person"
     
     @classmethod
     def get_constituent_emails(cls, patron_id: int, emails_df: pd.DataFrame, primary_email: str = "") -> tuple:
-        """
-        Get up to 2 emails for a constituent with priority logic based on email count
-        
-        BUSINESS RULE:
-        If constituent has MORE THAN 3 emails in Input Emails sheet:
-          1. CB Email 1 = Primary Email from Input Constituents sheet
-          2. CB Email 2 = 1st email from Input Emails sheet (earliest row)
-          3. Remaining emails from Input Emails are ignored
-        
-        If constituent has 3 OR FEWER emails:
-          1. CB Email 1 = First email from Input Emails sheet
-          2. CB Email 2 = Second email from Input Emails sheet
-          3. If no emails in Input Emails, use Primary Email as fallback for CB Email 1
-        
-        Args:
-            patron_id: Constituent's Patron ID
-            emails_df: Input Emails dataframe  
-            primary_email: Primary Email from Input Constituents sheet
-            
-        Returns:
-            tuple: (email_1, email_2) - Both standardized and cleaned
-        
-        Examples:
-            Patron has 5 emails (>3):
-              Primary Email: "john@company.com"
-              Input Emails: ["john.doe@gmail.com", "j.doe@work.com", ...]
-              Result: ("john@company.com", "john.doe@gmail.com")
-            
-            Patron has 2 emails (<=3):
-              Primary Email: "mary@company.com"
-              Input Emails: ["mary.smith@gmail.com", "msmith@work.com"]
-              Result: ("mary.smith@gmail.com", "msmith@work.com")
-        """
-        # Get all emails for this patron from Input Emails sheet (already cleaned)
         constituent_emails = emails_df[emails_df["Patron ID"] == patron_id]["Email"].tolist()
-        
-        # Filter out empty/invalid emails
         constituent_emails = [email for email in constituent_emails if email and str(email).strip()]
-        
         email_count = len(constituent_emails)
         
-        # CASE 1: More than 3 emails -> Prioritize Primary Email from Constituents
         if email_count > 3:
             email_1 = primary_email if primary_email and str(primary_email).strip() else ""
             email_2 = constituent_emails[0] if len(constituent_emails) > 0 else ""
-        
-        # CASE 2: 3 or fewer emails -> Use Input Emails order, Primary as fallback
         else:
             email_1 = constituent_emails[0] if len(constituent_emails) > 0 else (primary_email if primary_email else "")
             email_2 = constituent_emails[1] if len(constituent_emails) > 1 else ""
@@ -147,17 +91,12 @@ class FieldMappingRules:
     
     @classmethod
     def calculate_donation_summary(cls, patron_id: int, donations_df: pd.DataFrame) -> tuple:
-        """Calculate donation summary for a constituent"""
         constituent_donations = donations_df[donations_df["Patron ID"] == patron_id]
         
         if constituent_donations.empty:
-            # No donations - return empty strings
             return "", "", ""
         
-        # Calculate lifetime donation amount
         lifetime_amount = constituent_donations["Donation Amount"].sum()
-        
-        # Get most recent donation (by date)
         most_recent = constituent_donations.loc[constituent_donations["Donation Date"].idxmax()]
         recent_date = most_recent["Donation Date"]
         recent_amount = most_recent["Donation Amount"]
@@ -195,11 +134,8 @@ class FieldMappingRules:
 
 
 class VendorValidationRules:
-    """Validation rules for Vendor output columns"""
-    
     @classmethod
     def validate_cb_constituent_id(cls, value: Any) -> List[str]:
-        """Validate CB Constituent ID - must be unique ID per constituent"""
         errors = []
         if not value or str(value).strip() == "":
             errors.append("CB Constituent ID is required")
@@ -207,7 +143,6 @@ class VendorValidationRules:
     
     @classmethod
     def validate_cb_constituent_type(cls, value: Any) -> List[str]:
-        """Validate CB Constituent Type - must be 'Person' or 'Company'"""
         errors = []
         if not value:
             errors.append("CB Constituent Type is required")
@@ -217,7 +152,6 @@ class VendorValidationRules:
     
     @classmethod
     def validate_cb_name_fields(cls, row_data: dict) -> List[str]:
-        """Validate name fields based on constituent type"""
         errors = []
         constituent_type = row_data.get(VendorOutputColumns.CB_CONSTITUENT_TYPE.value)
         
@@ -239,7 +173,6 @@ class VendorValidationRules:
     
     @classmethod
     def validate_cb_created_at(cls, value: Any) -> List[str]:
-        """Validate CB Created At - required timestamp"""
         errors = []
         if not value or str(value).strip() == "" or str(value).strip().lower() == "nan":
             errors.append("CB Created At is required - timestamp of when constituent was first created")
@@ -247,18 +180,15 @@ class VendorValidationRules:
     
     @classmethod
     def validate_cb_email(cls, value: Any, field_name: str) -> List[str]:
-        """Validate CB Email fields - if present, must be standardized and well formatted"""
         errors = []
         if value and str(value).strip():
             email = str(value).strip()
-            # Basic email format validation
             if "@" not in email or "." not in email.split("@")[-1]:
                 errors.append(f"{field_name} must be a standardized and well formatted email for a valid domain")
         return errors
     
     @classmethod
     def validate_cb_title(cls, value: Any) -> List[str]:
-        """Validate CB Title - must be one of allowed values or empty string"""
         errors = []
         if value is not None:
             title = str(value).strip()
@@ -269,19 +199,16 @@ class VendorValidationRules:
     
     @classmethod
     def validate_cb_donation_fields(cls, row_data: dict) -> List[str]:
-        """Validate donation fields - should be empty string if constituent has never donated"""
         errors = []
         
         lifetime_amount = row_data.get(VendorOutputColumns.CB_LIFETIME_DONATION.value, "")
         recent_date = row_data.get(VendorOutputColumns.CB_RECENT_DONATION_DATE.value, "")
         recent_amount = row_data.get(VendorOutputColumns.CB_RECENT_DONATION_AMOUNT.value, "")
         
-        # Check consistency - if no donations, all should be empty
         has_lifetime = lifetime_amount and str(lifetime_amount).strip()
         has_recent_date = recent_date and str(recent_date).strip()
         has_recent_amount = recent_amount and str(recent_amount).strip()
         
-        # If constituent has donations, all three fields should have values
         if any([has_lifetime, has_recent_date, has_recent_amount]):
             if not has_lifetime:
                 errors.append("CB Lifetime Donation Amount should have value if constituent has donated")
