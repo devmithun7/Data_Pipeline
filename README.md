@@ -348,11 +348,8 @@ data_engineering_task/
 - Review log files for specific errors
 - Close Excel files before running
 
-**Windows users**: Close ALL Excel files before running the pipeline!
+**users**: Close ALL Excel files before running the pipeline!
 
-## License
-
-This project is licensed under the MIT License.
 
 
 
